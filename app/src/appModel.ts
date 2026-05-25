@@ -55,6 +55,7 @@ export interface Campaign {
   name: string
   type: CampaignType
   notes: string
+  islandId: string | null
   locationIds: string[]
   status: CampaignStatus
   prizeTemplates: PrizeTemplate[]
@@ -196,6 +197,7 @@ function normalizeCampaign(campaign: Campaign & { isEnabled?: boolean }): Campai
 
   return {
     ...rest,
+    islandId: typeof campaign.islandId === 'string' ? campaign.islandId : null,
     status: normalizeCampaignStatus(campaign.status, isEnabled),
     prizeTemplates: Array.isArray(prizeTemplates)
       ? prizeTemplates.map((prizeTemplate) => normalizePrizeTemplate(prizeTemplate as PrizeTemplate))
@@ -353,12 +355,18 @@ function derivePrizeCategoriesFromCampaigns(campaigns: Campaign[]): PrizeCategor
   return Array.from(categoryMap.values())
 }
 
-function seedCampaigns(locationIds: string[], prizeCategories: PrizeCategory[]): Campaign[] {
+function seedCampaigns(
+  locationIds: string[],
+  prizeCategories: PrizeCategory[],
+  islands: Island[],
+): Campaign[] {
   const categoryMap = new Map(prizeCategories.map((prizeCategory) => [prizeCategory.name, prizeCategory]))
   const tshirtCategory = categoryMap.get('Camiseta Mahou') ?? prizeCategories[0]
   const drinkCategory = categoryMap.get('Pack consumicion') ?? prizeCategories[1] ?? prizeCategories[0]
   const openerCategory = categoryMap.get('Abridor Mahou') ?? prizeCategories[2] ?? prizeCategories[0]
   const ticketCategory = categoryMap.get('Entrada concierto') ?? prizeCategories[3] ?? prizeCategories[0]
+  const primaryIslandId = islands[0]?.id ?? null
+  const secondaryIslandId = islands[1]?.id ?? primaryIslandId
 
   return [
     {
@@ -366,6 +374,7 @@ function seedCampaigns(locationIds: string[], prizeCategories: PrizeCategory[]):
       name: 'Mahou Tardeo Chamberi',
       type: 'accion',
       notes: 'Activacion de un unico local con foco en captacion y dinamica inmediata.',
+      islandId: primaryIslandId,
       locationIds: [locationIds[0]],
       status: 'active',
       prizeTemplates: [
@@ -381,6 +390,7 @@ function seedCampaigns(locationIds: string[], prizeCategories: PrizeCategory[]):
       name: 'Ruta Roja Centro',
       type: 'ruta',
       notes: 'Ruta multi local para mover publico entre varios puntos de consumo.',
+      islandId: secondaryIslandId,
       locationIds: [locationIds[1], locationIds[2], locationIds[0]],
       status: 'active',
       prizeTemplates: [
@@ -423,6 +433,7 @@ export function createDefaultState(): AppState {
     campaigns: seedCampaigns(
       locations.map((location) => location.id),
       prizeCategories,
+      islands,
     ),
     sessions: [],
   }

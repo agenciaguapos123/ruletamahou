@@ -575,6 +575,10 @@
   justify-content: center;
 }
 
+.campaign-builder-title {
+  font-size: clamp(2.8rem, 5vw, 4.2rem);
+}
+
 .screen-grid-admin .campaign-card-head,
 .screen-grid-admin .campaign-card-controls {
   align-items: center;
@@ -948,12 +952,45 @@
   color: rgba(255, 248, 244, 0.86);
 }
 
+.selector-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
+.selector-summary {
+  color: rgba(255, 248, 244, 0.72);
+  font-size: 0.9rem;
+}
+
+.builder-location-filter {
+  width: min(100%, 520px);
+  margin-inline: auto;
+}
+
 .selector-card {
-  flex-direction: row;
+  align-items: stretch;
+  justify-content: space-between;
   background: rgba(255, 248, 244, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 20px;
   padding: 14px;
+}
+
+.selector-card-active {
+  border-color: rgba(255, 248, 244, 0.5);
+  background: rgba(255, 248, 244, 0.14);
+}
+
+.selector-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.selector-select-button {
+  width: 100%;
 }
 
 .nested-form {

@@ -83,6 +83,14 @@ function getSessionSpinLogs(session: ActivationSession): ActivationSpinLog[] {
   return Array.isArray(session.spinLogs) ? session.spinLogs : []
 }
 
+function getIslandName(islandId: string | null, islands: Island[]): string {
+  if (!islandId) {
+    return 'Sin isla asignada'
+  }
+
+  return islands.find((island) => island.id === islandId)?.name ?? 'Sin isla asignada'
+}
+
 function createDraftWindowSet(quota = 10): ScheduleWindow[] {
   return [createScheduleWindow('Franja 1', '18:00', '21:00', quota)]
 }
@@ -398,6 +406,10 @@ function App() {
       return 'Selecciona una isla para abrir la activacion.'
     }
 
+    if (campaign.islandId && campaign.islandId !== island.id) {
+      return 'La accion o ruta seleccionada no pertenece a la isla indicada.'
+    }
+
     const promoterNames = parsePromoters(rawPromoters)
 
     if (!promoterNames.length) {
@@ -555,6 +567,9 @@ function App() {
     setAppState((previousState) => ({
       ...previousState,
       islands: previousState.islands.filter((island) => island.id !== islandId),
+      campaigns: previousState.campaigns.map((campaign) =>
+        campaign.islandId === islandId ? { ...campaign, islandId: null } : campaign,
+      ),
     }))
   }
 
@@ -762,7 +777,6 @@ function App() {
                 campaigns={appState.campaigns}
                 sessions={appState.sessions}
                 isCampaignBuilderOpen={campaignBuilderOpen}
-                onOpenCampaignBuilder={handleOpenCampaignBuilder}
                 onCloseCampaignBuilder={handleCloseCampaignBuilder}
                 onCreateIsland={handleCreateIsland}
                 onUpdateIsland={handleUpdateIsland}
@@ -885,6 +899,9 @@ function Dashboard({
 }) {
   const navigate = useNavigate()
   const activeCampaigns = campaigns.filter((campaign) => campaign.status === 'active')
+  const filteredActiveCampaigns = activeCampaigns.filter(
+    (campaign) => !selectedIslandId || !campaign.islandId || campaign.islandId === selectedIslandId,
+  )
   const liveSessions = sessions.filter((session) => session.status === 'live')
   const [selectedCampaignId, setSelectedCampaignId] = useState('')
   const [selectedIslandId, setSelectedIslandId] = useState('')
@@ -892,10 +909,13 @@ function Dashboard({
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!activeCampaigns.length || !activeCampaigns.some((campaign) => campaign.id === selectedCampaignId)) {
+    if (
+      !filteredActiveCampaigns.length ||
+      !filteredActiveCampaigns.some((campaign) => campaign.id === selectedCampaignId)
+    ) {
       setSelectedCampaignId('')
     }
-  }, [activeCampaigns, selectedCampaignId])
+  }, [filteredActiveCampaigns, selectedCampaignId])
 
   useEffect(() => {
     if (!islands.length || !islands.some((island) => island.id === selectedIslandId)) {
@@ -904,13 +924,17 @@ function Dashboard({
   }, [islands, selectedIslandId])
 
   const selectedCampaign =
-    activeCampaigns.find((campaign) => campaign.id === selectedCampaignId) ?? null
+    filteredActiveCampaigns.find((campaign) => campaign.id === selectedCampaignId) ?? null
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
 
     if (!selectedCampaignId) {
-      setErrorMessage('Necesitas al menos una accion o ruta activa en configuracion.')
+      setErrorMessage(
+        selectedIslandId && !filteredActiveCampaigns.length
+          ? 'No hay acciones o rutas activas para la isla seleccionada.'
+          : 'Necesitas al menos una accion o ruta activa en configuracion.',
+      )
       return
     }
 
@@ -959,9 +983,15 @@ function Dashboard({
               onChange={(event) => setSelectedCampaignId(event.target.value)}
             >
               <option value="">
-                {activeCampaigns.length ? 'Selecciona una accion o ruta' : 'No hay acciones activas'}
+                {selectedIslandId
+                  ? filteredActiveCampaigns.length
+                    ? 'Selecciona una accion o ruta'
+                    : 'No hay acciones para esta isla'
+                  : activeCampaigns.length
+                    ? 'Selecciona una accion o ruta'
+                    : 'No hay acciones activas'}
               </option>
-              {activeCampaigns.map((campaign) => (
+              {filteredActiveCampaigns.map((campaign) => (
                 <option key={campaign.id} value={campaign.id}>
                   {campaign.name} · {campaign.type === 'accion' ? 'Accion' : 'Ruta'}
                 </option>
@@ -977,6 +1007,7 @@ function Dashboard({
                 </span>
               </div>
               <strong>{selectedCampaign.name}</strong>
+              <p>{getIslandName(selectedCampaign.islandId, islands)}</p>
               <p>{formatLocationList(selectedCampaign.locationIds, locations)}</p>
               <div className="tag-row">
                 {selectedCampaign.prizeTemplates.map((prizeTemplate) => (
@@ -1097,7 +1128,6 @@ function AdminPanel({
   campaigns,
   sessions,
   isCampaignBuilderOpen,
-  onOpenCampaignBuilder,
   onCloseCampaignBuilder,
   onCreateIsland,
   onUpdateIsland,
@@ -1121,7 +1151,6 @@ function AdminPanel({
   campaigns: Campaign[]
   sessions: ActivationSession[]
   isCampaignBuilderOpen: boolean
-  onOpenCampaignBuilder: () => void
   onCloseCampaignBuilder: () => void
   onCreateIsland: (name: string) => void
   onUpdateIsland: (islandId: string, name: string) => void
@@ -1150,7 +1179,9 @@ function AdminPanel({
   const [campaignName, setCampaignName] = useState('')
   const [campaignType, setCampaignType] = useState<CampaignType>('accion')
   const [campaignNotes, setCampaignNotes] = useState('')
+  const [campaignIslandId, setCampaignIslandId] = useState('')
   const [selectedLocationIds, setSelectedLocationIds] = useState<string[]>([])
+  const [locationFilter, setLocationFilter] = useState('')
   const [selectedPrizeCategoryId, setSelectedPrizeCategoryId] = useState('')
   const [draftPrizes, setDraftPrizes] = useState<PrizeTemplate[]>([])
   const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null)
@@ -1175,6 +1206,14 @@ function AdminPanel({
     )
   const selectedPrizeCategory =
     prizeCategories.find((prizeCategory) => prizeCategory.id === selectedPrizeCategoryId) ?? null
+  const normalizedLocationFilter = locationFilter.trim().toLowerCase()
+  const filteredLocations = locations.filter((location) =>
+    !normalizedLocationFilter
+      ? true
+      : [location.name, location.city].some((value) =>
+          value.toLowerCase().includes(normalizedLocationFilter),
+        ),
+  )
 
   const resetLocationForm = () => {
     setLocationName('')
@@ -1209,7 +1248,9 @@ function AdminPanel({
     setCampaignName('')
     setCampaignType('accion')
     setCampaignNotes('')
+    setCampaignIslandId('')
     setSelectedLocationIds([])
+    setLocationFilter('')
     setDraftPrizes([])
     setEditingCampaignId(null)
     resetDraftPrizeForm()
@@ -1221,6 +1262,30 @@ function AdminPanel({
       setSelectedLocationIds(selectedLocationIds.slice(0, 1))
     }
   }, [campaignType, selectedLocationIds])
+
+  useEffect(() => {
+    if (isCampaignBuilderOpen && editingCampaignId) {
+      resetCampaignForm()
+    }
+  }, [isCampaignBuilderOpen])
+
+  useEffect(() => {
+    setSelectedLocationIds((previousSelection) =>
+      previousSelection.filter((locationId) =>
+        locations.some((location) => location.id === locationId),
+      ),
+    )
+  }, [locations])
+
+  useEffect(() => {
+    if (!campaignIslandId) {
+      return
+    }
+
+    if (!islands.some((island) => island.id === campaignIslandId)) {
+      setCampaignIslandId('')
+    }
+  }, [campaignIslandId, islands])
 
   const toggleLocationSelection = (locationId: string) => {
     if (campaignType === 'accion') {
@@ -1547,6 +1612,11 @@ function AdminPanel({
       return
     }
 
+    if (!campaignIslandId) {
+      setCampaignMessage('Selecciona la isla de la operativa.')
+      return
+    }
+
     if (!selectedLocationIds.length) {
       setCampaignMessage('Selecciona al menos un local.')
       return
@@ -1572,6 +1642,7 @@ function AdminPanel({
       name: campaignName.trim(),
       type: campaignType,
       notes: campaignNotes.trim(),
+      islandId: campaignIslandId,
       locationIds: [...selectedLocationIds],
       status: existingCampaign?.status ?? 'active',
       prizeTemplates: draftPrizes.map((prizeTemplate) => clonePrizeTemplateForEditor(prizeTemplate)),
@@ -1592,12 +1663,13 @@ function AdminPanel({
   }
 
   const handleEditCampaignClick = (campaign: Campaign) => {
-    onOpenCampaignBuilder()
     setEditingCampaignId(campaign.id)
     setCampaignName(campaign.name)
     setCampaignType(campaign.type)
     setCampaignNotes(campaign.notes)
+    setCampaignIslandId(campaign.islandId ?? '')
     setSelectedLocationIds([...campaign.locationIds])
+    setLocationFilter('')
     setDraftPrizes(campaign.prizeTemplates.map((prizeTemplate) => clonePrizeTemplateForEditor(prizeTemplate)))
     resetDraftPrizeForm()
     setCampaignMessage(null)
@@ -1874,9 +1946,8 @@ function AdminPanel({
         <section className="panel panel-wide">
           <div className="panel-header">
             <div>
-              <p className="eyebrow">{editingCampaignId ? 'Editar accion o ruta' : 'Crear accion o ruta'}</p>
-              <h2 className="section-title">
-                {editingCampaignId ? 'Actualiza la operativa seleccionada' : 'Diseña la operativa reusable'}
+              <h2 className="section-title campaign-builder-title">
+                {editingCampaignId ? 'Editar accion o ruta' : 'Crear accion o ruta'}
               </h2>
             </div>
           </div>
@@ -1902,6 +1973,21 @@ function AdminPanel({
                 <option value="ruta">Ruta en varios locales</option>
               </select>
             </label>
+
+            <label className="field-group">
+              <span>Isla de la operativa</span>
+              <select
+                value={campaignIslandId}
+                onChange={(event) => setCampaignIslandId(event.target.value)}
+              >
+                <option value="">Selecciona una isla</option>
+                {islands.map((island) => (
+                  <option key={island.id} value={island.id}>
+                    {island.name}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
 
           <label className="field-group">
@@ -1915,26 +2001,64 @@ function AdminPanel({
           </label>
 
           <div className="selector-block">
-            <span className="selector-label">
-              {campaignType === 'accion'
-                ? 'Selecciona el local de la accion'
-                : 'Selecciona los locales de la ruta'}
-            </span>
-            <div className="selector-grid">
-              {locations.map((location) => (
-                <label className="selector-card" key={location.id}>
-                  <input
-                    type={campaignType === 'accion' ? 'radio' : 'checkbox'}
-                    checked={selectedLocationIds.includes(location.id)}
-                    onChange={() => toggleLocationSelection(location.id)}
-                  />
-                  <div>
-                    <strong>{location.name}</strong>
-                    <span>{location.city}</span>
-                  </div>
-                </label>
-              ))}
+            <div className="selector-toolbar">
+              <span className="selector-label">
+                {campaignType === 'accion'
+                  ? 'Selecciona el local de la accion'
+                  : 'Selecciona los locales de la ruta'}
+              </span>
+              <span className="selector-summary">
+                {campaignType === 'accion'
+                  ? selectedLocationIds.length
+                    ? '1 local seleccionado'
+                    : 'Sin local seleccionado'
+                  : `${selectedLocationIds.length} locales seleccionados`}
+              </span>
             </div>
+
+            <label className="field-group builder-location-filter">
+              <span>Filtrar locales</span>
+              <input
+                value={locationFilter}
+                onChange={(event) => setLocationFilter(event.target.value)}
+                placeholder="Busca por nombre o ciudad"
+              />
+            </label>
+
+            <div className="selector-grid">
+              {filteredLocations.map((location) => {
+                const isSelected = selectedLocationIds.includes(location.id)
+
+                return (
+                  <article
+                    className={isSelected ? 'selector-card selector-card-active' : 'selector-card'}
+                    key={location.id}
+                  >
+                    <div className="selector-card-body">
+                      <strong>{location.name}</strong>
+                      <span>{location.city}</span>
+                    </div>
+                    <button
+                      className={isSelected ? 'secondary-button selector-select-button' : 'ghost-button selector-select-button'}
+                      type="button"
+                      onClick={() => toggleLocationSelection(location.id)}
+                    >
+                      {campaignType === 'accion'
+                        ? isSelected
+                          ? 'Seleccionado'
+                          : 'Seleccionar'
+                        : isSelected
+                          ? 'Quitar'
+                          : 'Seleccionar'}
+                    </button>
+                  </article>
+                )
+              })}
+            </div>
+
+            {filteredLocations.length ? null : (
+              <div className="empty-state">No hay locales que coincidan con el filtro actual.</div>
+            )}
           </div>
 
           <div className="draft-block">
@@ -2186,6 +2310,7 @@ function AdminPanel({
               <span className={campaign.status === 'active' ? 'status-chip accent' : 'status-chip'}>
                 {getCampaignStatusLabel(campaign.status)}
               </span>
+              <p>{getIslandName(campaign.islandId, islands)}</p>
               <p>{formatLocationList(campaign.locationIds, locations)}</p>
               <p>{campaign.notes || 'Sin notas operativas.'}</p>
                             {campaign.type === 'ruta' ? (
