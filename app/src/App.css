@@ -1151,6 +1151,13 @@
   gap: 10px;
 }
 
+.card-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
 .destructive-button {
   border-color: rgba(255, 209, 215, 0.28);
   color: #ffd1d7;

@@ -83,6 +83,21 @@ function getSessionSpinLogs(session: ActivationSession): ActivationSpinLog[] {
   return Array.isArray(session.spinLogs) ? session.spinLogs : []
 }
 
+function createDraftWindowSet(quota = 10): ScheduleWindow[] {
+  return [createScheduleWindow('Franja 1', '18:00', '21:00', quota)]
+}
+
+function cloneDraftWindows(windows: ScheduleWindow[]): ScheduleWindow[] {
+  return windows.map((windowSlot) => ({ ...windowSlot }))
+}
+
+function clonePrizeTemplateForEditor(prizeTemplate: PrizeTemplate): PrizeTemplate {
+  return {
+    ...prizeTemplate,
+    windows: cloneDraftWindows(prizeTemplate.windows),
+  }
+}
+
 type FullscreenDocument = Document & {
   webkitFullscreenElement?: Element | null
   mozFullScreenElement?: Element | null
@@ -466,6 +481,25 @@ function App() {
     }))
   }
 
+  const handleUpdateIsland = (islandId: string, name: string) => {
+    setAppState((previousState) => ({
+      ...previousState,
+      islands: previousState.islands.map((island) =>
+        island.id === islandId ? { ...island, name } : island,
+      ),
+      sessions: previousState.sessions.map((session) =>
+        session.islandId === islandId ? { ...session, islandName: name } : session,
+      ),
+    }))
+  }
+
+  const handleDeleteIsland = (islandId: string) => {
+    setAppState((previousState) => ({
+      ...previousState,
+      islands: previousState.islands.filter((island) => island.id !== islandId),
+    }))
+  }
+
   const handleCreatePrizeCategory = (prizeCategory: PrizeCategory) => {
     setAppState((previousState) => ({
       ...previousState,
@@ -473,10 +507,58 @@ function App() {
     }))
   }
 
+  const handleUpdatePrizeCategory = (updatedPrizeCategory: PrizeCategory) => {
+    setAppState((previousState) => ({
+      ...previousState,
+      prizeCategories: previousState.prizeCategories.map((prizeCategory) =>
+        prizeCategory.id === updatedPrizeCategory.id ? updatedPrizeCategory : prizeCategory,
+      ),
+      campaigns: previousState.campaigns.map((campaign) => ({
+        ...campaign,
+        prizeTemplates: campaign.prizeTemplates.map((prizeTemplate) =>
+          prizeTemplate.categoryId === updatedPrizeCategory.id
+            ? {
+                ...prizeTemplate,
+                name: updatedPrizeCategory.name,
+                description: updatedPrizeCategory.description,
+                imageSrc: updatedPrizeCategory.imageSrc,
+              }
+            : prizeTemplate,
+        ),
+      })),
+    }))
+  }
+
+  const handleDeletePrizeCategory = (prizeCategoryId: string) => {
+    setAppState((previousState) => ({
+      ...previousState,
+      prizeCategories: previousState.prizeCategories.filter(
+        (prizeCategory) => prizeCategory.id !== prizeCategoryId,
+      ),
+      campaigns: previousState.campaigns.map((campaign) => ({
+        ...campaign,
+        prizeTemplates: campaign.prizeTemplates.map((prizeTemplate) =>
+          prizeTemplate.categoryId === prizeCategoryId
+            ? { ...prizeTemplate, categoryId: null }
+            : prizeTemplate,
+        ),
+      })),
+    }))
+  }
+
   const handleCreateCampaign = (campaign: Campaign) => {
     setAppState((previousState) => ({
       ...previousState,
       campaigns: [campaign, ...previousState.campaigns],
+    }))
+  }
+
+  const handleUpdateCampaign = (updatedCampaign: Campaign) => {
+    setAppState((previousState) => ({
+      ...previousState,
+      campaigns: previousState.campaigns.map((campaign) =>
+        campaign.id === updatedCampaign.id ? updatedCampaign : campaign,
+      ),
     }))
   }
 
@@ -597,9 +679,14 @@ function App() {
                 campaigns={appState.campaigns}
                 sessions={appState.sessions}
                 onCreateIsland={handleCreateIsland}
+                onUpdateIsland={handleUpdateIsland}
+                onDeleteIsland={handleDeleteIsland}
                 onCreateLocation={handleCreateLocation}
                 onCreatePrizeCategory={handleCreatePrizeCategory}
+                onUpdatePrizeCategory={handleUpdatePrizeCategory}
+                onDeletePrizeCategory={handleDeletePrizeCategory}
                 onCreateCampaign={handleCreateCampaign}
+                onUpdateCampaign={handleUpdateCampaign}
                 onUpdateCampaignStatus={handleUpdateCampaignStatus}
                                 onDeleteCampaign={handleDeleteCampaign}
                 onUpdateAdminAccessCode={handleUpdateAdminAccessCode}
@@ -922,9 +1009,14 @@ function AdminPanel({
   campaigns,
   sessions,
   onCreateIsland,
+  onUpdateIsland,
+  onDeleteIsland,
   onCreateLocation,
   onCreatePrizeCategory,
+  onUpdatePrizeCategory,
+  onDeletePrizeCategory,
   onCreateCampaign,
+  onUpdateCampaign,
   onUpdateCampaignStatus,
   onDeleteCampaign,
   onUpdateAdminAccessCode,
@@ -936,9 +1028,14 @@ function AdminPanel({
   campaigns: Campaign[]
   sessions: ActivationSession[]
   onCreateIsland: (name: string) => void
+  onUpdateIsland: (islandId: string, name: string) => void
+  onDeleteIsland: (islandId: string) => void
   onCreateLocation: (name: string, city: string) => void
   onCreatePrizeCategory: (prizeCategory: PrizeCategory) => void
+  onUpdatePrizeCategory: (prizeCategory: PrizeCategory) => void
+  onDeletePrizeCategory: (prizeCategoryId: string) => void
   onCreateCampaign: (campaign: Campaign) => void
+  onUpdateCampaign: (campaign: Campaign) => void
   onUpdateCampaignStatus: (campaignId: string, nextStatus: CampaignStatus) => void
   onUpdateAdminAccessCode: (currentCode: string, nextCode: string) => string | null
   onDeleteCampaign: (campaignId: string) => void
@@ -946,20 +1043,22 @@ function AdminPanel({
   const [locationName, setLocationName] = useState('')
   const [locationCity, setLocationCity] = useState('')
   const [islandName, setIslandName] = useState('')
+  const [editingIslandId, setEditingIslandId] = useState<string | null>(null)
   const [categoryName, setCategoryName] = useState('')
   const [categoryDescription, setCategoryDescription] = useState('')
   const [categoryImageSrc, setCategoryImageSrc] = useState<string | null>(null)
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null)
   const [campaignName, setCampaignName] = useState('')
   const [campaignType, setCampaignType] = useState<CampaignType>('accion')
   const [campaignNotes, setCampaignNotes] = useState('')
   const [selectedLocationIds, setSelectedLocationIds] = useState<string[]>([])
   const [selectedPrizeCategoryId, setSelectedPrizeCategoryId] = useState('')
   const [draftPrizes, setDraftPrizes] = useState<PrizeTemplate[]>([])
+  const [editingCampaignId, setEditingCampaignId] = useState<string | null>(null)
+  const [editingDraftPrizeId, setEditingDraftPrizeId] = useState<string | null>(null)
   const [prizeStock, setPrizeStock] = useState('10')
   const [prizeTimeMode, setPrizeTimeMode] = useState<PrizeTimeMode>('always')
-  const [draftWindows, setDraftWindows] = useState<ScheduleWindow[]>([
-    createScheduleWindow('Franja 1', '18:00', '21:00', 10),
-  ])
+  const [draftWindows, setDraftWindows] = useState<ScheduleWindow[]>(createDraftWindowSet())
   const [campaignMessage, setCampaignMessage] = useState<string | null>(null)
   const [locationMessage, setLocationMessage] = useState<string | null>(null)
   const [islandMessage, setIslandMessage] = useState<string | null>(null)
@@ -977,6 +1076,39 @@ function AdminPanel({
     )
   const selectedPrizeCategory =
     prizeCategories.find((prizeCategory) => prizeCategory.id === selectedPrizeCategoryId) ?? null
+
+  const resetIslandForm = () => {
+    setIslandName('')
+    setEditingIslandId(null)
+    setIslandMessage(null)
+  }
+
+  const resetCategoryForm = () => {
+    setCategoryName('')
+    setCategoryDescription('')
+    setCategoryImageSrc(null)
+    setEditingCategoryId(null)
+    setCategoryMessage(null)
+  }
+
+  const resetDraftPrizeForm = () => {
+    setSelectedPrizeCategoryId('')
+    setPrizeStock('10')
+    setPrizeTimeMode('always')
+    setDraftWindows(createDraftWindowSet())
+    setEditingDraftPrizeId(null)
+  }
+
+  const resetCampaignForm = () => {
+    setCampaignName('')
+    setCampaignType('accion')
+    setCampaignNotes('')
+    setSelectedLocationIds([])
+    setDraftPrizes([])
+    setEditingCampaignId(null)
+    resetDraftPrizeForm()
+    setCampaignMessage(null)
+  }
 
   useEffect(() => {
     if (campaignType === 'accion' && selectedLocationIds.length > 1) {
@@ -1022,9 +1154,47 @@ function AdminPanel({
       return
     }
 
+    if (
+      islands.some(
+        (island) =>
+          island.id !== editingIslandId &&
+          island.name.trim().toLowerCase() === trimmedName.toLowerCase(),
+      )
+    ) {
+      setIslandMessage('Ya existe una isla con ese nombre.')
+      return
+    }
+
+    if (editingIslandId) {
+      onUpdateIsland(editingIslandId, trimmedName)
+      resetIslandForm()
+      setIslandMessage('Isla actualizada correctamente.')
+      return
+    }
+
     onCreateIsland(trimmedName)
-    setIslandName('')
+    resetIslandForm()
     setIslandMessage('Isla creada correctamente.')
+  }
+
+  const handleEditIslandClick = (island: Island) => {
+    setIslandName(island.name)
+    setEditingIslandId(island.id)
+    setIslandMessage(null)
+  }
+
+  const handleDeleteIslandClick = (island: Island) => {
+    if (!window.confirm(`Se eliminara ${island.name} de la operativa. Continuar?`)) {
+      return
+    }
+
+    onDeleteIsland(island.id)
+
+    if (editingIslandId === island.id) {
+      resetIslandForm()
+    }
+
+    setIslandMessage('Isla eliminada correctamente.')
   }
 
   const handleCategoryImageChange = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -1064,27 +1234,84 @@ function AdminPanel({
 
     if (
       prizeCategories.some(
-        (prizeCategory) => prizeCategory.name.trim().toLowerCase() === trimmedName.toLowerCase(),
+        (prizeCategory) =>
+          prizeCategory.id !== editingCategoryId &&
+          prizeCategory.name.trim().toLowerCase() === trimmedName.toLowerCase(),
       )
     ) {
       setCategoryMessage('Ya existe una categoria con ese nombre.')
       return
     }
 
-    onCreatePrizeCategory({
-      id: createId('category'),
+    const nextPrizeCategory = {
+      id: editingCategoryId ?? createId('category'),
       name: trimmedName,
       description: categoryDescription.trim(),
       imageSrc: categoryImageSrc,
-    })
-    setCategoryName('')
-    setCategoryDescription('')
-    setCategoryImageSrc(null)
+    }
+
+    if (editingCategoryId) {
+      onUpdatePrizeCategory(nextPrizeCategory)
+      setDraftPrizes((previousPrizes) =>
+        previousPrizes.map((prizeTemplate) =>
+          prizeTemplate.categoryId === editingCategoryId
+            ? {
+                ...prizeTemplate,
+                name: nextPrizeCategory.name,
+                description: nextPrizeCategory.description,
+                imageSrc: nextPrizeCategory.imageSrc,
+              }
+            : prizeTemplate,
+        ),
+      )
+      resetCategoryForm()
+      setCategoryMessage('Categoria actualizada correctamente.')
+      return
+    }
+
+    onCreatePrizeCategory(nextPrizeCategory)
+    resetCategoryForm()
     setCategoryMessage('Categoria creada correctamente.')
+  }
+
+  const handleEditPrizeCategoryClick = (prizeCategory: PrizeCategory) => {
+    setCategoryName(prizeCategory.name)
+    setCategoryDescription(prizeCategory.description)
+    setCategoryImageSrc(prizeCategory.imageSrc)
+    setEditingCategoryId(prizeCategory.id)
+    setCategoryMessage(null)
+  }
+
+  const handleDeletePrizeCategoryClick = (prizeCategory: PrizeCategory) => {
+    if (!window.confirm(`Se eliminara la categoria ${prizeCategory.name}. Continuar?`)) {
+      return
+    }
+
+    onDeletePrizeCategory(prizeCategory.id)
+    setDraftPrizes((previousPrizes) =>
+      previousPrizes.map((prizeTemplate) =>
+        prizeTemplate.categoryId === prizeCategory.id
+          ? { ...prizeTemplate, categoryId: null }
+          : prizeTemplate,
+      ),
+    )
+
+    if (editingCategoryId === prizeCategory.id) {
+      resetCategoryForm()
+    }
+
+    if (selectedPrizeCategoryId === prizeCategory.id) {
+      resetDraftPrizeForm()
+    }
+
+    setCategoryMessage('Categoria eliminada correctamente.')
   }
 
   const handleAddDraftPrize = () => {
     const parsedStock = Number.parseInt(prizeStock, 10)
+    const editingDraftPrize = editingDraftPrizeId
+      ? draftPrizes.find((prizeTemplate) => prizeTemplate.id === editingDraftPrizeId) ?? null
+      : null
 
     if (!selectedPrizeCategory) {
       setCampaignMessage('Selecciona una categoria de premio.')
@@ -1101,27 +1328,66 @@ function AdminPanel({
       return
     }
 
-    if (draftPrizes.some((prizeTemplate) => prizeTemplate.categoryId === selectedPrizeCategory.id)) {
+    if (
+      draftPrizes.some(
+        (prizeTemplate) =>
+          prizeTemplate.categoryId === selectedPrizeCategory.id &&
+          prizeTemplate.id !== editingDraftPrizeId,
+      )
+    ) {
       setCampaignMessage('Esta categoria ya esta añadida a la accion o ruta.')
       return
     }
 
-    setDraftPrizes((previousPrizes) => [
-      ...previousPrizes,
-      buildPrizeTemplateFromCategory(selectedPrizeCategory, parsedStock, {
-        timeMode: prizeTimeMode,
-        windows: draftWindows,
-      }),
-    ])
-    setSelectedPrizeCategoryId('')
-    setPrizeStock('10')
-    setPrizeTimeMode('always')
-    setDraftWindows([createScheduleWindow('Franja 1', '18:00', '21:00', 10)])
+    const nextPrizeTemplateBase = buildPrizeTemplateFromCategory(selectedPrizeCategory, parsedStock, {
+      timeMode: prizeTimeMode,
+      windows: draftWindows,
+    })
+    const nextPrizeTemplate: PrizeTemplate = {
+      ...nextPrizeTemplateBase,
+      id: editingDraftPrize?.id ?? nextPrizeTemplateBase.id,
+      isEnabled: editingDraftPrize?.isEnabled ?? nextPrizeTemplateBase.isEnabled,
+    }
+
+    setDraftPrizes((previousPrizes) =>
+      editingDraftPrize
+        ? previousPrizes.map((prizeTemplate) =>
+            prizeTemplate.id === editingDraftPrize.id ? nextPrizeTemplate : prizeTemplate,
+          )
+        : [...previousPrizes, nextPrizeTemplate],
+    )
+    resetDraftPrizeForm()
+    setCampaignMessage(null)
+  }
+
+  const handleEditDraftPrizeClick = (prizeTemplate: PrizeTemplate) => {
+    setEditingDraftPrizeId(prizeTemplate.id)
+    setSelectedPrizeCategoryId(prizeTemplate.categoryId ?? '')
+    setPrizeStock(String(prizeTemplate.stock))
+    setPrizeTimeMode(prizeTemplate.timeMode)
+    setDraftWindows(
+      prizeTemplate.timeMode === 'scheduled'
+        ? cloneDraftWindows(prizeTemplate.windows)
+        : createDraftWindowSet(prizeTemplate.stock),
+    )
+    setCampaignMessage(null)
+  }
+
+  const handleDeleteDraftPrizeClick = (prizeId: string) => {
+    setDraftPrizes((previousPrizes) => previousPrizes.filter((prizeTemplate) => prizeTemplate.id !== prizeId))
+
+    if (editingDraftPrizeId === prizeId) {
+      resetDraftPrizeForm()
+    }
+
     setCampaignMessage(null)
   }
 
   const handleCreateCampaignSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    const existingCampaign = editingCampaignId
+      ? campaigns.find((campaign) => campaign.id === editingCampaignId) ?? null
+      : null
 
     if (!campaignName.trim()) {
       setCampaignMessage('La accion o ruta necesita un nombre.')
@@ -1148,21 +1414,45 @@ function AdminPanel({
       return
     }
 
-    onCreateCampaign({
-      id: createId('campaign'),
+    const nextCampaign: Campaign = {
+      id: existingCampaign?.id ?? createId('campaign'),
       name: campaignName.trim(),
       type: campaignType,
       notes: campaignNotes.trim(),
-      locationIds: selectedLocationIds,
-      status: 'active',
-      prizeTemplates: draftPrizes,
-    })
-    setCampaignName('')
-    setCampaignNotes('')
-    setSelectedLocationIds([])
-    setSelectedPrizeCategoryId('')
-    setDraftPrizes([])
-    setCampaignMessage('Configuracion guardada y activada.')
+      locationIds: [...selectedLocationIds],
+      status: existingCampaign?.status ?? 'active',
+      prizeTemplates: draftPrizes.map((prizeTemplate) => clonePrizeTemplateForEditor(prizeTemplate)),
+    }
+
+    if (existingCampaign) {
+      onUpdateCampaign(nextCampaign)
+    } else {
+      onCreateCampaign(nextCampaign)
+    }
+
+    resetCampaignForm()
+    setCampaignMessage(
+      existingCampaign
+        ? 'Configuracion actualizada correctamente.'
+        : 'Configuracion guardada y activada.',
+    )
+  }
+
+  const handleEditCampaignClick = (campaign: Campaign) => {
+    setEditingCampaignId(campaign.id)
+    setCampaignName(campaign.name)
+    setCampaignType(campaign.type)
+    setCampaignNotes(campaign.notes)
+    setSelectedLocationIds([...campaign.locationIds])
+    setDraftPrizes(campaign.prizeTemplates.map((prizeTemplate) => clonePrizeTemplateForEditor(prizeTemplate)))
+    resetDraftPrizeForm()
+    setCampaignMessage(null)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  const handleCancelCampaignEdit = () => {
+    resetCampaignForm()
+    setCampaignMessage(null)
   }
 
   const handleAccessCodeSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -1201,6 +1491,10 @@ function AdminPanel({
       )
     ) {
       return
+    }
+
+    if (editingCampaignId === campaign.id) {
+      handleCancelCampaignEdit()
     }
 
     onDeleteCampaign(campaign.id)
@@ -1266,9 +1560,17 @@ function AdminPanel({
 
           {islandMessage ? <p className="form-message">{islandMessage}</p> : null}
 
-          <button className="secondary-button" type="submit">
-            Crear isla
-          </button>
+          <div className="card-action-row">
+            <button className="secondary-button" type="submit">
+              {editingIslandId ? 'Guardar isla' : 'Crear isla'}
+            </button>
+
+            {editingIslandId ? (
+              <button className="ghost-button" type="button" onClick={resetIslandForm}>
+                Cancelar
+              </button>
+            ) : null}
+          </div>
         </form>
 
         <div className="location-list">
@@ -1276,6 +1578,22 @@ function AdminPanel({
             <article className="mini-panel" key={island.id}>
               <strong>{island.name}</strong>
               <span>Isla operativa</span>
+              <div className="card-action-row">
+                <button
+                  className="ghost-button"
+                  type="button"
+                  onClick={() => handleEditIslandClick(island)}
+                >
+                  Editar
+                </button>
+                <button
+                  className="ghost-button destructive-button"
+                  type="button"
+                  onClick={() => handleDeleteIslandClick(island)}
+                >
+                  Eliminar
+                </button>
+              </div>
             </article>
           ))}
         </div>
@@ -1324,9 +1642,17 @@ function AdminPanel({
 
             {categoryMessage ? <p className="form-message">{categoryMessage}</p> : null}
 
-            <button className="secondary-button" type="submit">
-              Crear categoria
-            </button>
+            <div className="card-action-row">
+              <button className="secondary-button" type="submit">
+                {editingCategoryId ? 'Guardar categoria' : 'Crear categoria'}
+              </button>
+
+              {editingCategoryId ? (
+                <button className="ghost-button" type="button" onClick={resetCategoryForm}>
+                  Cancelar
+                </button>
+              ) : null}
+            </div>
           </form>
 
           {prizeCategories.length ? (
@@ -1340,6 +1666,22 @@ function AdminPanel({
                     <strong>{prizeCategory.name}</strong>
                     <p>{prizeCategory.description || 'Categoria reusable para acciones y rutas'}</p>
                   </div>
+                  <div className="card-action-row">
+                    <button
+                      className="ghost-button"
+                      type="button"
+                      onClick={() => handleEditPrizeCategoryClick(prizeCategory)}
+                    >
+                      Editar
+                    </button>
+                    <button
+                      className="ghost-button destructive-button"
+                      type="button"
+                      onClick={() => handleDeletePrizeCategoryClick(prizeCategory)}
+                    >
+                      Eliminar
+                    </button>
+                  </div>
                 </article>
               ))}
             </div>
@@ -1352,8 +1694,10 @@ function AdminPanel({
       <section className="panel panel-wide">
         <div className="panel-header">
           <div>
-            <p className="eyebrow">Crear accion o ruta</p>
-            <h2 className="section-title">Diseña la operativa reusable</h2>
+            <p className="eyebrow">{editingCampaignId ? 'Editar accion o ruta' : 'Crear accion o ruta'}</p>
+            <h2 className="section-title">
+              {editingCampaignId ? 'Actualiza la operativa seleccionada' : 'Diseña la operativa reusable'}
+            </h2>
           </div>
         </div>
 
@@ -1510,8 +1854,14 @@ function AdminPanel({
                 onClick={handleAddDraftPrize}
                 disabled={!prizeCategories.length}
               >
-                Anadir premio a la bolsa
+                {editingDraftPrizeId ? 'Guardar cambios del premio' : 'Anadir premio a la bolsa'}
               </button>
+
+              {editingDraftPrizeId ? (
+                <button className="ghost-button" type="button" onClick={resetDraftPrizeForm}>
+                  Cancelar edicion del premio
+                </button>
+              ) : null}
             </div>
 
             {draftPrizes.length ? (
@@ -1525,7 +1875,23 @@ function AdminPanel({
                       <strong>{prize.name}</strong>
                       <p>{prize.description || (prize.imageSrc ? 'Foto cargada' : 'Sin descripcion')}</p>
                     </div>
-                    <span>{prize.stock} uds.</span>
+                    <span>{prize.stock} uds. · {prize.timeMode === 'always' ? 'Siempre activo' : 'Por franjas'}</span>
+                    <div className="card-action-row">
+                      <button
+                        className="ghost-button"
+                        type="button"
+                        onClick={() => handleEditDraftPrizeClick(prize)}
+                      >
+                        Editar premio
+                      </button>
+                      <button
+                        className="ghost-button destructive-button"
+                        type="button"
+                        onClick={() => handleDeleteDraftPrizeClick(prize.id)}
+                      >
+                        Quitar
+                      </button>
+                    </div>
                   </article>
                 ))}
               </div>
@@ -1534,9 +1900,17 @@ function AdminPanel({
 
           {campaignMessage ? <p className="form-message">{campaignMessage}</p> : null}
 
-          <button className="primary-button" type="submit">
-            Guardar configuracion base
-          </button>
+          <div className="card-action-row">
+            <button className="primary-button" type="submit">
+              {editingCampaignId ? 'Guardar cambios de la operativa' : 'Guardar configuracion base'}
+            </button>
+
+            {editingCampaignId ? (
+              <button className="ghost-button" type="button" onClick={handleCancelCampaignEdit}>
+                Cancelar
+              </button>
+            ) : null}
+          </div>
         </form>
       </section>
 
@@ -1610,6 +1984,14 @@ function AdminPanel({
                       <option value="closed">Cerrada</option>
                     </select>
                   </label>
+
+                  <button
+                    className="ghost-button"
+                    type="button"
+                    onClick={() => handleEditCampaignClick(campaign)}
+                  >
+                    Editar
+                  </button>
 
                   <button
                     className="ghost-button destructive-button"
