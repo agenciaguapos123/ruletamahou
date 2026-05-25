@@ -1087,7 +1087,7 @@ function AdminPanel({
 
   return (
     <main className="screen-grid screen-grid-admin">
-      <section className="panel">
+      <section className="panel panel-wide">
         <div className="panel-header">
           <div>
             <p className="eyebrow">Configuracion general</p>
