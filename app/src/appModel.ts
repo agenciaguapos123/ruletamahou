@@ -687,5 +687,5 @@ export function formatLocationList(locationIds: string[], locations: Location[])
     .map((locationId) => locations.find((location) => location.id === locationId)?.name)
     .filter((name): name is string => Boolean(name))
 
-  return names.join(' · ')
+  return names.length ? names.join(' · ') : 'Sin local asignado'
 }

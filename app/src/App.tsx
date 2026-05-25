@@ -287,6 +287,7 @@ function App() {
     loadSessionUser(loadAppState()),
   )
   const [adminUnlocked, setAdminUnlocked] = useState(false)
+  const [campaignBuilderOpen, setCampaignBuilderOpen] = useState(false)
   const [now, setNow] = useState(() => new Date())
 
   useEffect(() => {
@@ -328,6 +329,12 @@ function App() {
       setCurrentUser(refreshedUser)
     }
   }, [appState.users, currentUser])
+
+  useEffect(() => {
+    if (location.pathname !== '/admin') {
+      setCampaignBuilderOpen(false)
+    }
+  }, [location.pathname])
 
   const canAccessAdmin = currentUser?.role === 'admin' || adminUnlocked
 
@@ -468,6 +475,57 @@ function App() {
     }))
   }
 
+  const handleUpdateLocation = (locationId: string, name: string, city: string) => {
+    setAppState((previousState) => ({
+      ...previousState,
+      locations: previousState.locations.map((location) =>
+        location.id === locationId ? { ...location, name, city } : location,
+      ),
+    }))
+  }
+
+  const handleDeleteLocation = (locationId: string) => {
+    setAppState((previousState) => {
+      const nextCampaigns = previousState.campaigns.map((campaign) => {
+        const nextLocationIds = campaign.locationIds.filter((entry) => entry !== locationId)
+
+        if (nextLocationIds.length === campaign.locationIds.length) {
+          return campaign
+        }
+
+        return {
+          ...campaign,
+          locationIds: nextLocationIds,
+          status: nextLocationIds.length ? campaign.status : 'closed',
+        }
+      })
+
+      return {
+        ...previousState,
+        locations: previousState.locations.filter((location) => location.id !== locationId),
+        campaigns: nextCampaigns,
+        sessions: previousState.sessions.map((session) => {
+          const nextLocationIds = session.locationIds.filter((entry) => entry !== locationId)
+
+          if (nextLocationIds.length === session.locationIds.length) {
+            return session
+          }
+
+          const matchingCampaign = nextCampaigns.find((campaign) => campaign.id === session.campaignId)
+
+          return {
+            ...session,
+            locationIds: nextLocationIds,
+            status:
+              session.status === 'live' && (!matchingCampaign || !matchingCampaign.locationIds.length)
+                ? 'completed'
+                : session.status,
+          }
+        }),
+      }
+    })
+  }
+
   const handleCreateIsland = (name: string) => {
     setAppState((previousState) => ({
       ...previousState,
@@ -600,6 +658,15 @@ function App() {
     return null
   }
 
+  const handleOpenCampaignBuilder = () => {
+    setCampaignBuilderOpen(true)
+    navigate('/admin')
+  }
+
+  const handleCloseCampaignBuilder = () => {
+    setCampaignBuilderOpen(false)
+  }
+
   if (!currentUser) {
     return <LoginScreen onLogin={handleLogin} />
   }
@@ -621,6 +688,19 @@ function App() {
           >
             Inicio
           </button>
+          {canAccessAdmin ? (
+            <button
+              className={
+                location.pathname === '/admin' && campaignBuilderOpen
+                  ? 'menu-link menu-link-active'
+                  : 'menu-link'
+              }
+              type="button"
+              onClick={handleOpenCampaignBuilder}
+            >
+              Crear accion/ruta
+            </button>
+          ) : null}
           <button
             className="menu-link"
             type="button"
@@ -633,7 +713,10 @@ function App() {
             type="button"
             aria-label="Configuracion"
             title="Configuracion"
-            onClick={() => navigate('/admin')}
+            onClick={() => {
+              handleCloseCampaignBuilder()
+              navigate('/admin')
+            }}
           >
             <img className="settings-icon" src={assetPath('icons/settings.png')} alt="" />
           </button>
@@ -678,10 +761,15 @@ function App() {
                 prizeCategories={appState.prizeCategories}
                 campaigns={appState.campaigns}
                 sessions={appState.sessions}
+                isCampaignBuilderOpen={campaignBuilderOpen}
+                onOpenCampaignBuilder={handleOpenCampaignBuilder}
+                onCloseCampaignBuilder={handleCloseCampaignBuilder}
                 onCreateIsland={handleCreateIsland}
                 onUpdateIsland={handleUpdateIsland}
                 onDeleteIsland={handleDeleteIsland}
                 onCreateLocation={handleCreateLocation}
+                onUpdateLocation={handleUpdateLocation}
+                onDeleteLocation={handleDeleteLocation}
                 onCreatePrizeCategory={handleCreatePrizeCategory}
                 onUpdatePrizeCategory={handleUpdatePrizeCategory}
                 onDeletePrizeCategory={handleDeletePrizeCategory}
@@ -1008,10 +1096,15 @@ function AdminPanel({
   prizeCategories,
   campaigns,
   sessions,
+  isCampaignBuilderOpen,
+  onOpenCampaignBuilder,
+  onCloseCampaignBuilder,
   onCreateIsland,
   onUpdateIsland,
   onDeleteIsland,
   onCreateLocation,
+  onUpdateLocation,
+  onDeleteLocation,
   onCreatePrizeCategory,
   onUpdatePrizeCategory,
   onDeletePrizeCategory,
@@ -1027,10 +1120,15 @@ function AdminPanel({
   prizeCategories: PrizeCategory[]
   campaigns: Campaign[]
   sessions: ActivationSession[]
+  isCampaignBuilderOpen: boolean
+  onOpenCampaignBuilder: () => void
+  onCloseCampaignBuilder: () => void
   onCreateIsland: (name: string) => void
   onUpdateIsland: (islandId: string, name: string) => void
   onDeleteIsland: (islandId: string) => void
   onCreateLocation: (name: string, city: string) => void
+  onUpdateLocation: (locationId: string, name: string, city: string) => void
+  onDeleteLocation: (locationId: string) => void
   onCreatePrizeCategory: (prizeCategory: PrizeCategory) => void
   onUpdatePrizeCategory: (prizeCategory: PrizeCategory) => void
   onDeletePrizeCategory: (prizeCategoryId: string) => void
@@ -1042,6 +1140,7 @@ function AdminPanel({
 }) {
   const [locationName, setLocationName] = useState('')
   const [locationCity, setLocationCity] = useState('')
+  const [editingLocationId, setEditingLocationId] = useState<string | null>(null)
   const [islandName, setIslandName] = useState('')
   const [editingIslandId, setEditingIslandId] = useState<string | null>(null)
   const [categoryName, setCategoryName] = useState('')
@@ -1076,6 +1175,13 @@ function AdminPanel({
     )
   const selectedPrizeCategory =
     prizeCategories.find((prizeCategory) => prizeCategory.id === selectedPrizeCategoryId) ?? null
+
+  const resetLocationForm = () => {
+    setLocationName('')
+    setLocationCity('')
+    setEditingLocationId(null)
+    setLocationMessage(null)
+  }
 
   const resetIslandForm = () => {
     setIslandName('')
@@ -1139,10 +1245,57 @@ function AdminPanel({
       return
     }
 
+    if (
+      locations.some(
+        (location) =>
+          location.id !== editingLocationId &&
+          location.name.trim().toLowerCase() === trimmedName.toLowerCase() &&
+          location.city.trim().toLowerCase() === trimmedCity.toLowerCase(),
+      )
+    ) {
+      setLocationMessage('Ya existe un local con ese nombre en esa ciudad.')
+      return
+    }
+
+    if (editingLocationId) {
+      onUpdateLocation(editingLocationId, trimmedName, trimmedCity)
+      resetLocationForm()
+      setLocationMessage('Local actualizado correctamente.')
+      return
+    }
+
     onCreateLocation(trimmedName, trimmedCity)
-    setLocationName('')
-    setLocationCity('')
+    resetLocationForm()
     setLocationMessage('Local creado correctamente.')
+  }
+
+  const handleEditLocationClick = (location: Location) => {
+    setLocationName(location.name)
+    setLocationCity(location.city)
+    setEditingLocationId(location.id)
+    setLocationMessage(null)
+  }
+
+  const handleDeleteLocationClick = (location: Location) => {
+    const linkedCampaignCount = campaigns.filter((campaign) => campaign.locationIds.includes(location.id)).length
+
+    if (
+      !window.confirm(
+        linkedCampaignCount
+          ? `Se eliminara ${location.name} y se actualizaran ${linkedCampaignCount} operativas vinculadas. Continuar?`
+          : `Se eliminara ${location.name}. Continuar?`,
+      )
+    ) {
+      return
+    }
+
+    onDeleteLocation(location.id)
+
+    if (editingLocationId === location.id) {
+      resetLocationForm()
+    }
+
+    setLocationMessage('Local eliminado correctamente.')
   }
 
   const handleCreateIslandSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -1439,6 +1592,7 @@ function AdminPanel({
   }
 
   const handleEditCampaignClick = (campaign: Campaign) => {
+    onOpenCampaignBuilder()
     setEditingCampaignId(campaign.id)
     setCampaignName(campaign.name)
     setCampaignType(campaign.type)
@@ -1452,6 +1606,7 @@ function AdminPanel({
 
   const handleCancelCampaignEdit = () => {
     resetCampaignForm()
+    onCloseCampaignBuilder()
     setCampaignMessage(null)
   }
 
@@ -1534,9 +1689,17 @@ function AdminPanel({
 
           {locationMessage ? <p className="form-message">{locationMessage}</p> : null}
 
-          <button className="secondary-button" type="submit">
-            Crear local
-          </button>
+          <div className="card-action-row">
+            <button className="secondary-button" type="submit">
+              {editingLocationId ? 'Guardar local' : 'Crear local'}
+            </button>
+
+            {editingLocationId ? (
+              <button className="ghost-button" type="button" onClick={resetLocationForm}>
+                Cancelar
+              </button>
+            ) : null}
+          </div>
         </form>
 
         <div className="location-list">
@@ -1544,6 +1707,22 @@ function AdminPanel({
             <article className="mini-panel" key={location.id}>
               <strong>{location.name}</strong>
               <span>{location.city}</span>
+              <div className="card-action-row">
+                <button
+                  className="ghost-button"
+                  type="button"
+                  onClick={() => handleEditLocationClick(location)}
+                >
+                  Editar
+                </button>
+                <button
+                  className="ghost-button destructive-button"
+                  type="button"
+                  onClick={() => handleDeleteLocationClick(location)}
+                >
+                  Eliminar
+                </button>
+              </div>
             </article>
           ))}
         </div>
@@ -1691,17 +1870,18 @@ function AdminPanel({
         </div>
       </section>
 
-      <section className="panel panel-wide">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow">{editingCampaignId ? 'Editar accion o ruta' : 'Crear accion o ruta'}</p>
-            <h2 className="section-title">
-              {editingCampaignId ? 'Actualiza la operativa seleccionada' : 'Diseña la operativa reusable'}
-            </h2>
+      {isCampaignBuilderOpen || editingCampaignId ? (
+        <section className="panel panel-wide">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">{editingCampaignId ? 'Editar accion o ruta' : 'Crear accion o ruta'}</p>
+              <h2 className="section-title">
+                {editingCampaignId ? 'Actualiza la operativa seleccionada' : 'Diseña la operativa reusable'}
+              </h2>
+            </div>
           </div>
-        </div>
 
-        <form className="stack-form" onSubmit={handleCreateCampaignSubmit}>
+          <form className="stack-form" onSubmit={handleCreateCampaignSubmit}>
           <div className="inline-fields inline-fields-wide">
             <label className="field-group">
               <span>Nombre</span>
@@ -1911,8 +2091,9 @@ function AdminPanel({
               </button>
             ) : null}
           </div>
-        </form>
-      </section>
+          </form>
+        </section>
+      ) : null}
 
       <section className="panel panel-wide">
         <div className="panel-header">
