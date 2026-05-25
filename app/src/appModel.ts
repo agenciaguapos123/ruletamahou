@@ -17,6 +17,18 @@ export interface Location {
   city: string
 }
 
+export interface Island {
+  id: string
+  name: string
+}
+
+export interface PrizeCategory {
+  id: string
+  name: string
+  description: string
+  imageSrc: string | null
+}
+
 export interface ScheduleWindow {
   id: string
   label: string
@@ -28,6 +40,7 @@ export interface ScheduleWindow {
 
 export interface PrizeTemplate {
   id: string
+  categoryId: string | null
   name: string
   description: string
   imageSrc: string | null
@@ -73,6 +86,8 @@ export interface ActivationSession {
   campaignName: string
   campaignType: CampaignType
   locationIds: string[]
+  islandId: string | null
+  islandName: string | null
   promoterNames: string[]
   startedAt: string
   status: 'live' | 'completed'
@@ -87,6 +102,8 @@ export interface AppState {
   users: AppUser[]
   adminAccessCode: string
   locations: Location[]
+  islands: Island[]
+  prizeCategories: PrizeCategory[]
   campaigns: Campaign[]
   sessions: ActivationSession[]
 }
@@ -144,6 +161,14 @@ function sanitizePrizeDescription(description: unknown): string {
   return description.trim() === 'Premio directo para trafico de tardeo.' ? '' : description
 }
 
+function normalizePrizeCategory(prizeCategory: PrizeCategory): PrizeCategory {
+  return {
+    ...prizeCategory,
+    description: sanitizePrizeDescription(prizeCategory.description),
+    imageSrc: typeof prizeCategory.imageSrc === 'string' ? prizeCategory.imageSrc : null,
+  }
+}
+
 function normalizeCampaignStatus(status: unknown, legacyIsEnabled?: unknown): CampaignStatus {
   if (status === 'active' || status === 'paused' || status === 'closed') {
     return status
@@ -155,6 +180,7 @@ function normalizeCampaignStatus(status: unknown, legacyIsEnabled?: unknown): Ca
 function normalizePrizeTemplate(prizeTemplate: PrizeTemplate): PrizeTemplate {
   return {
     ...prizeTemplate,
+    categoryId: typeof prizeTemplate.categoryId === 'string' ? prizeTemplate.categoryId : null,
     description: sanitizePrizeDescription(prizeTemplate.description),
     imageSrc: typeof prizeTemplate.imageSrc === 'string' ? prizeTemplate.imageSrc : null,
     windows: Array.isArray(prizeTemplate.windows)
@@ -216,6 +242,8 @@ function normalizeActivationSession(session: ActivationSession): ActivationSessi
   return {
     ...session,
     status: session.status === 'completed' ? 'completed' : 'live',
+    islandId: typeof session.islandId === 'string' ? session.islandId : null,
+    islandName: typeof session.islandName === 'string' ? session.islandName : null,
     prizes: Array.isArray(session.prizes)
       ? session.prizes.map((prize) => normalizeActivationPrize(prize as ActivationPrize))
       : [],
@@ -236,7 +264,102 @@ function seedLocations(): Location[] {
   ]
 }
 
-function seedCampaigns(locationIds: string[]): Campaign[] {
+function seedIslands(): Island[] {
+  return [
+    { id: createId('island'), name: 'Isla 1' },
+    { id: createId('island'), name: 'Isla 2' },
+    { id: createId('island'), name: 'Isla 3' },
+  ]
+}
+
+function seedPrizeCategories(): PrizeCategory[] {
+  return [
+    {
+      id: createId('category'),
+      name: 'Camiseta Mahou',
+      description: '',
+      imageSrc: null,
+    },
+    {
+      id: createId('category'),
+      name: 'Pack consumicion',
+      description: 'Solo activo en la franja fuerte del afterwork.',
+      imageSrc: null,
+    },
+    {
+      id: createId('category'),
+      name: 'Abridor Mahou',
+      description: 'Premio always-on para mantener giro constante.',
+      imageSrc: null,
+    },
+    {
+      id: createId('category'),
+      name: 'Entrada concierto',
+      description: 'Se desbloquea solo en la parte final de la ruta.',
+      imageSrc: null,
+    },
+  ]
+}
+
+export function buildPrizeTemplateFromCategory(
+  prizeCategory: PrizeCategory,
+  stock: number,
+  options?: {
+    timeMode?: PrizeTimeMode
+    windows?: ScheduleWindow[]
+  },
+): PrizeTemplate {
+  const timeMode = options?.timeMode ?? 'always'
+
+  return {
+    id: createId('prize'),
+    categoryId: prizeCategory.id,
+    name: prizeCategory.name,
+    description: prizeCategory.description,
+    imageSrc: prizeCategory.imageSrc,
+    stock,
+    isEnabled: true,
+    timeMode,
+    windows: timeMode === 'scheduled' ? cloneWindows(options?.windows ?? []) : [],
+  }
+}
+
+function derivePrizeCategoriesFromCampaigns(campaigns: Campaign[]): PrizeCategory[] {
+  const categoryMap = new Map<string, PrizeCategory>()
+
+  campaigns.forEach((campaign) => {
+    campaign.prizeTemplates.forEach((prizeTemplate) => {
+      const categoryId =
+        typeof prizeTemplate.categoryId === 'string' && prizeTemplate.categoryId
+          ? prizeTemplate.categoryId
+          : null
+      const key =
+        categoryId ??
+        [prizeTemplate.name, sanitizePrizeDescription(prizeTemplate.description), prizeTemplate.imageSrc ?? ''].join('::')
+
+      if (categoryMap.has(key)) {
+        return
+      }
+
+      categoryMap.set(key, {
+        id: categoryId ?? createId('category'),
+        name: prizeTemplate.name,
+        description: sanitizePrizeDescription(prizeTemplate.description),
+        imageSrc: typeof prizeTemplate.imageSrc === 'string' ? prizeTemplate.imageSrc : null,
+      })
+    })
+  })
+
+  return Array.from(categoryMap.values())
+}
+
+function seedCampaigns(locationIds: string[], prizeCategories: PrizeCategory[]): Campaign[] {
+  const categoryMap = new Map(prizeCategories.map((prizeCategory) => [prizeCategory.name, prizeCategory]))
+  const tshirtCategory = categoryMap.get('Camiseta Mahou') ?? prizeCategories[0]
+  const drinkCategory = categoryMap.get('Pack consumicion') ?? prizeCategories[1] ?? prizeCategories[0]
+  const openerCategory = categoryMap.get('Abridor Mahou') ?? prizeCategories[2] ?? prizeCategories[0]
+  const ticketCategory = categoryMap.get('Entrada concierto') ?? prizeCategories[3] ?? prizeCategories[0]
+
   return [
     {
       id: createId('campaign'),
@@ -246,26 +369,11 @@ function seedCampaigns(locationIds: string[]): Campaign[] {
       locationIds: [locationIds[0]],
       status: 'active',
       prizeTemplates: [
-        {
-          id: createId('prize'),
-          name: 'Camiseta Mahou',
-          description: '',
-          imageSrc: null,
-          stock: 20,
-          isEnabled: true,
-          timeMode: 'always',
-          windows: [],
-        },
-        {
-          id: createId('prize'),
-          name: 'Pack consumicion',
-          description: 'Solo activo en la franja fuerte del afterwork.',
-          imageSrc: null,
-          stock: 16,
-          isEnabled: true,
+        buildPrizeTemplateFromCategory(tshirtCategory, 20),
+        buildPrizeTemplateFromCategory(drinkCategory, 16, {
           timeMode: 'scheduled',
           windows: [createScheduleWindow('Afterwork', '19:00', '22:00', 16)],
-        },
+        }),
       ],
     },
     {
@@ -276,26 +384,11 @@ function seedCampaigns(locationIds: string[]): Campaign[] {
       locationIds: [locationIds[1], locationIds[2], locationIds[0]],
       status: 'active',
       prizeTemplates: [
-        {
-          id: createId('prize'),
-          name: 'Abridor Mahou',
-          description: 'Premio always-on para mantener giro constante.',
-          imageSrc: null,
-          stock: 40,
-          isEnabled: true,
-          timeMode: 'always',
-          windows: [],
-        },
-        {
-          id: createId('prize'),
-          name: 'Entrada concierto',
-          description: 'Se desbloquea solo en la parte final de la ruta.',
-          imageSrc: null,
-          stock: 10,
-          isEnabled: true,
+        buildPrizeTemplateFromCategory(openerCategory, 40),
+        buildPrizeTemplateFromCategory(ticketCategory, 10, {
           timeMode: 'scheduled',
           windows: [createScheduleWindow('Cierre', '21:30', '23:30', 10)],
-        },
+        }),
       ],
     },
   ]
@@ -303,6 +396,8 @@ function seedCampaigns(locationIds: string[]): Campaign[] {
 
 export function createDefaultState(): AppState {
   const locations = seedLocations()
+  const islands = seedIslands()
+  const prizeCategories = seedPrizeCategories()
 
   return {
     users: [
@@ -323,7 +418,12 @@ export function createDefaultState(): AppState {
     ],
     adminAccessCode: 'mahou-admin',
     locations,
-    campaigns: seedCampaigns(locations.map((location) => location.id)),
+    islands,
+    prizeCategories,
+    campaigns: seedCampaigns(
+      locations.map((location) => location.id),
+      prizeCategories,
+    ),
     sessions: [],
   }
 }
@@ -342,6 +442,19 @@ export function loadAppState(): AppState {
 
     const parsedState = JSON.parse(rawState) as Partial<AppState>
     const defaultState = createDefaultState()
+    const campaigns = Array.isArray(parsedState.campaigns)
+      ? parsedState.campaigns.map((campaign) =>
+          normalizeCampaign(campaign as Campaign & { isEnabled?: boolean }),
+        )
+      : defaultState.campaigns
+    const derivedPrizeCategories = derivePrizeCategoriesFromCampaigns(campaigns)
+    const prizeCategories = Array.isArray(parsedState.prizeCategories)
+      ? parsedState.prizeCategories.map((prizeCategory) =>
+          normalizePrizeCategory(prizeCategory as PrizeCategory),
+        )
+      : derivedPrizeCategories.length
+        ? derivedPrizeCategories
+        : defaultState.prizeCategories
 
     return {
       users: Array.isArray(parsedState.users) && parsedState.users.length
@@ -354,11 +467,11 @@ export function loadAppState(): AppState {
       locations: Array.isArray(parsedState.locations)
         ? parsedState.locations
         : defaultState.locations,
-      campaigns: Array.isArray(parsedState.campaigns)
-        ? parsedState.campaigns.map((campaign) =>
-            normalizeCampaign(campaign as Campaign & { isEnabled?: boolean }),
-          )
-        : defaultState.campaigns,
+      islands: Array.isArray(parsedState.islands)
+        ? parsedState.islands
+        : defaultState.islands,
+      prizeCategories,
+      campaigns,
       sessions: Array.isArray(parsedState.sessions)
         ? parsedState.sessions.map((session) =>
             normalizeActivationSession(session as ActivationSession),
@@ -429,6 +542,7 @@ export function parsePromoters(rawValue: string): string[] {
 export function buildActivationSession(
   campaign: Campaign,
   promoterNames: string[],
+  island: Island,
 ): ActivationSession {
   return {
     id: createId('session'),
@@ -436,6 +550,8 @@ export function buildActivationSession(
     campaignName: campaign.name,
     campaignType: campaign.type,
     locationIds: [...campaign.locationIds],
+    islandId: island.id,
+    islandName: island.name,
     promoterNames,
     startedAt: new Date().toISOString(),
     status: 'live',

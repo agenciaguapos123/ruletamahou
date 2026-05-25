@@ -17,11 +17,14 @@ import {
   Campaign,
   CampaignStatus,
   CampaignType,
+  Island,
   Location,
+  PrizeCategory,
   PrizeTemplate,
   PrizeTimeMode,
   ScheduleWindow,
   buildActivationSession,
+  buildPrizeTemplateFromCategory,
   createId,
   createScheduleWindow,
   drawPrize,
@@ -361,11 +364,16 @@ function App() {
     }))
   }
 
-  const handleStartActivation = (campaignId: string, rawPromoters: string) => {
+  const handleStartActivation = (campaignId: string, rawPromoters: string, islandId: string) => {
     const campaign = appState.campaigns.find((entry) => entry.id === campaignId)
+    const island = appState.islands.find((entry) => entry.id === islandId)
 
     if (!campaign || campaign.status !== 'active') {
       return 'Selecciona una accion o ruta activa.'
+    }
+
+    if (!island) {
+      return 'Selecciona una isla para abrir la activacion.'
     }
 
     const promoterNames = parsePromoters(rawPromoters)
@@ -374,7 +382,7 @@ function App() {
       return 'Introduce al menos un promotor para abrir la activacion.'
     }
 
-    const session = buildActivationSession(campaign, promoterNames)
+    const session = buildActivationSession(campaign, promoterNames, island)
 
     setAppState((previousState) => ({
       ...previousState,
@@ -442,6 +450,26 @@ function App() {
           city,
         },
       ],
+    }))
+  }
+
+  const handleCreateIsland = (name: string) => {
+    setAppState((previousState) => ({
+      ...previousState,
+      islands: [
+        ...previousState.islands,
+        {
+          id: createId('island'),
+          name,
+        },
+      ],
+    }))
+  }
+
+  const handleCreatePrizeCategory = (prizeCategory: PrizeCategory) => {
+    setAppState((previousState) => ({
+      ...previousState,
+      prizeCategories: [...previousState.prizeCategories, prizeCategory],
     }))
   }
 
@@ -535,6 +563,7 @@ function App() {
           path="/"
           element={
             <Dashboard
+              islands={appState.islands}
               locations={appState.locations}
               campaigns={appState.campaigns}
               sessions={appState.sessions}
@@ -562,10 +591,14 @@ function App() {
             canAccessAdmin ? (
               <AdminPanel
                 currentUser={currentUser}
+                islands={appState.islands}
                 locations={appState.locations}
+                prizeCategories={appState.prizeCategories}
                 campaigns={appState.campaigns}
                 sessions={appState.sessions}
+                onCreateIsland={handleCreateIsland}
                 onCreateLocation={handleCreateLocation}
+                onCreatePrizeCategory={handleCreatePrizeCategory}
                 onCreateCampaign={handleCreateCampaign}
                 onUpdateCampaignStatus={handleUpdateCampaignStatus}
                                 onDeleteCampaign={handleDeleteCampaign}
@@ -663,33 +696,37 @@ function LoginScreen({ onLogin }: { onLogin: (username: string, password: string
 }
 
 function Dashboard({
+  islands,
   locations,
   campaigns,
   sessions,
   onStartActivation,
 }: {
+  islands: Island[]
   locations: Location[]
   campaigns: Campaign[]
   sessions: ActivationSession[]
-  onStartActivation: (campaignId: string, rawPromoters: string) => string | null
+  onStartActivation: (campaignId: string, rawPromoters: string, islandId: string) => string | null
 }) {
   const navigate = useNavigate()
   const activeCampaigns = campaigns.filter((campaign) => campaign.status === 'active')
   const liveSessions = sessions.filter((session) => session.status === 'live')
-  const [selectedCampaignId, setSelectedCampaignId] = useState(activeCampaigns[0]?.id ?? '')
+  const [selectedCampaignId, setSelectedCampaignId] = useState('')
+  const [selectedIslandId, setSelectedIslandId] = useState('')
   const [promoterInput, setPromoterInput] = useState('')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!activeCampaigns.length) {
+    if (!activeCampaigns.length || !activeCampaigns.some((campaign) => campaign.id === selectedCampaignId)) {
       setSelectedCampaignId('')
-      return
-    }
-
-    if (!activeCampaigns.some((campaign) => campaign.id === selectedCampaignId)) {
-      setSelectedCampaignId(activeCampaigns[0].id)
     }
   }, [activeCampaigns, selectedCampaignId])
+
+  useEffect(() => {
+    if (!islands.length || !islands.some((island) => island.id === selectedIslandId)) {
+      setSelectedIslandId('')
+    }
+  }, [islands, selectedIslandId])
 
   const selectedCampaign =
     activeCampaigns.find((campaign) => campaign.id === selectedCampaignId) ?? null
@@ -702,7 +739,12 @@ function Dashboard({
       return
     }
 
-    const result = onStartActivation(selectedCampaignId, promoterInput)
+    if (!selectedIslandId) {
+      setErrorMessage('Selecciona una isla antes de abrir la activacion.')
+      return
+    }
+
+    const result = onStartActivation(selectedCampaignId, promoterInput, selectedIslandId)
 
     if (result) {
       setErrorMessage(result)
@@ -721,12 +763,29 @@ function Dashboard({
 
         <form className="stack-form dashboard-access-form" onSubmit={handleSubmit}>
           <label className="field-group">
+            <span>Escoger Isla</span>
+            <select
+              value={selectedIslandId}
+              onChange={(event) => setSelectedIslandId(event.target.value)}
+            >
+              <option value="">Selecciona una isla</option>
+              {islands.map((island) => (
+                <option key={island.id} value={island.id}>
+                  {island.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="field-group">
             <span>Escoger Acción</span>
             <select
               value={selectedCampaignId}
               onChange={(event) => setSelectedCampaignId(event.target.value)}
             >
-              {activeCampaigns.length ? null : <option value="">No hay acciones activas</option>}
+              <option value="">
+                {activeCampaigns.length ? 'Selecciona una accion o ruta' : 'No hay acciones activas'}
+              </option>
               {activeCampaigns.map((campaign) => (
                 <option key={campaign.id} value={campaign.id}>
                   {campaign.name} · {campaign.type === 'accion' ? 'Accion' : 'Ruta'}
@@ -792,7 +851,11 @@ function Dashboard({
                   {session.campaignType === 'accion' ? 'Accion' : 'Ruta'}
                 </span>
                 <strong>{session.campaignName}</strong>
-                <span>{formatLocationList(session.locationIds, locations)}</span>
+                <span>
+                  {[formatLocationList(session.locationIds, locations), session.islandName]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </span>
               </button>
             ))}
           </div>
@@ -853,20 +916,28 @@ function AdminGate({ onUnlock }: { onUnlock: (code: string) => boolean }) {
 
 function AdminPanel({
   currentUser,
+  islands,
   locations,
+  prizeCategories,
   campaigns,
   sessions,
+  onCreateIsland,
   onCreateLocation,
+  onCreatePrizeCategory,
   onCreateCampaign,
   onUpdateCampaignStatus,
   onDeleteCampaign,
   onUpdateAdminAccessCode,
 }: {
   currentUser: AppUser
+  islands: Island[]
   locations: Location[]
+  prizeCategories: PrizeCategory[]
   campaigns: Campaign[]
   sessions: ActivationSession[]
+  onCreateIsland: (name: string) => void
   onCreateLocation: (name: string, city: string) => void
+  onCreatePrizeCategory: (prizeCategory: PrizeCategory) => void
   onCreateCampaign: (campaign: Campaign) => void
   onUpdateCampaignStatus: (campaignId: string, nextStatus: CampaignStatus) => void
   onUpdateAdminAccessCode: (currentCode: string, nextCode: string) => string | null
@@ -874,14 +945,16 @@ function AdminPanel({
 }) {
   const [locationName, setLocationName] = useState('')
   const [locationCity, setLocationCity] = useState('')
+  const [islandName, setIslandName] = useState('')
+  const [categoryName, setCategoryName] = useState('')
+  const [categoryDescription, setCategoryDescription] = useState('')
+  const [categoryImageSrc, setCategoryImageSrc] = useState<string | null>(null)
   const [campaignName, setCampaignName] = useState('')
   const [campaignType, setCampaignType] = useState<CampaignType>('accion')
   const [campaignNotes, setCampaignNotes] = useState('')
   const [selectedLocationIds, setSelectedLocationIds] = useState<string[]>([])
+  const [selectedPrizeCategoryId, setSelectedPrizeCategoryId] = useState('')
   const [draftPrizes, setDraftPrizes] = useState<PrizeTemplate[]>([])
-  const [prizeName, setPrizeName] = useState('')
-  const [prizeDescription, setPrizeDescription] = useState('')
-  const [prizeImageSrc, setPrizeImageSrc] = useState<string | null>(null)
   const [prizeStock, setPrizeStock] = useState('10')
   const [prizeTimeMode, setPrizeTimeMode] = useState<PrizeTimeMode>('always')
   const [draftWindows, setDraftWindows] = useState<ScheduleWindow[]>([
@@ -889,10 +962,12 @@ function AdminPanel({
   ])
   const [campaignMessage, setCampaignMessage] = useState<string | null>(null)
   const [locationMessage, setLocationMessage] = useState<string | null>(null)
+  const [islandMessage, setIslandMessage] = useState<string | null>(null)
+  const [categoryMessage, setCategoryMessage] = useState<string | null>(null)
   const [accessCodeCurrent, setAccessCodeCurrent] = useState('')
   const [accessCodeNext, setAccessCodeNext] = useState('')
   const [accessCodeMessage, setAccessCodeMessage] = useState<string | null>(null)
-  const visibleCampaigns = campaigns.filter((campaign) => campaign.status !== 'closed')
+  const manageableCampaigns = campaigns
   const loggedSessions = [...sessions]
     .filter((session) => session.status === 'completed' || getSessionSpinLogs(session).length > 0)
     .sort(
@@ -900,6 +975,8 @@ function AdminPanel({
         Date.parse(getSessionSpinLogs(right)[0]?.awardedAt ?? right.startedAt) -
         Date.parse(getSessionSpinLogs(left)[0]?.awardedAt ?? left.startedAt),
     )
+  const selectedPrizeCategory =
+    prizeCategories.find((prizeCategory) => prizeCategory.id === selectedPrizeCategoryId) ?? null
 
   useEffect(() => {
     if (campaignType === 'accion' && selectedLocationIds.length > 1) {
@@ -936,37 +1013,81 @@ function AdminPanel({
     setLocationMessage('Local creado correctamente.')
   }
 
-  const handlePrizeImageChange = async (event: ChangeEvent<HTMLInputElement>) => {
+  const handleCreateIslandSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const trimmedName = islandName.trim()
+
+    if (!trimmedName) {
+      setIslandMessage('Indica un nombre para la isla.')
+      return
+    }
+
+    onCreateIsland(trimmedName)
+    setIslandName('')
+    setIslandMessage('Isla creada correctamente.')
+  }
+
+  const handleCategoryImageChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const input = event.target
     const file = input.files?.[0]
 
     if (!file) {
-      setPrizeImageSrc(null)
+      setCategoryImageSrc(null)
       return
     }
 
     if (!file.type.startsWith('image/')) {
-      setCampaignMessage('Selecciona una imagen valida para el premio.')
+      setCategoryMessage('Selecciona una imagen valida para la categoria.')
       input.value = ''
       return
     }
 
     try {
       const nextImageSrc = await readImageAsDataUrl(file)
-      setPrizeImageSrc(nextImageSrc)
-      setCampaignMessage(null)
+      setCategoryImageSrc(nextImageSrc)
+      setCategoryMessage(null)
     } catch {
-      setCampaignMessage('No se pudo cargar la foto del premio.')
+      setCategoryMessage('No se pudo cargar la foto de la categoria.')
     }
 
     input.value = ''
   }
 
+  const handleCreatePrizeCategorySubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const trimmedName = categoryName.trim()
+
+    if (!trimmedName) {
+      setCategoryMessage('La categoria necesita un nombre.')
+      return
+    }
+
+    if (
+      prizeCategories.some(
+        (prizeCategory) => prizeCategory.name.trim().toLowerCase() === trimmedName.toLowerCase(),
+      )
+    ) {
+      setCategoryMessage('Ya existe una categoria con ese nombre.')
+      return
+    }
+
+    onCreatePrizeCategory({
+      id: createId('category'),
+      name: trimmedName,
+      description: categoryDescription.trim(),
+      imageSrc: categoryImageSrc,
+    })
+    setCategoryName('')
+    setCategoryDescription('')
+    setCategoryImageSrc(null)
+    setCategoryMessage('Categoria creada correctamente.')
+  }
+
   const handleAddDraftPrize = () => {
     const parsedStock = Number.parseInt(prizeStock, 10)
 
-    if (!prizeName.trim()) {
-      setCampaignMessage('Cada premio necesita un nombre.')
+    if (!selectedPrizeCategory) {
+      setCampaignMessage('Selecciona una categoria de premio.')
       return
     }
 
@@ -980,28 +1101,22 @@ function AdminPanel({
       return
     }
 
+    if (draftPrizes.some((prizeTemplate) => prizeTemplate.categoryId === selectedPrizeCategory.id)) {
+      setCampaignMessage('Esta categoria ya esta añadida a la accion o ruta.')
+      return
+    }
+
     setDraftPrizes((previousPrizes) => [
       ...previousPrizes,
-      {
-        id: createId('prize'),
-        name: prizeName.trim(),
-        description: prizeDescription.trim(),
-        imageSrc: prizeImageSrc,
-        stock: parsedStock,
-        isEnabled: true,
+      buildPrizeTemplateFromCategory(selectedPrizeCategory, parsedStock, {
         timeMode: prizeTimeMode,
-        windows:
-          prizeTimeMode === 'scheduled'
-            ? draftWindows.map((windowSlot) => ({ ...windowSlot, id: createId('window') }))
-            : [],
-      },
+        windows: draftWindows,
+      }),
     ])
-    setPrizeName('')
-    setPrizeDescription('')
-    setPrizeImageSrc(null)
+    setSelectedPrizeCategoryId('')
     setPrizeStock('10')
     setPrizeTimeMode('always')
-    setDraftWindows([createScheduleWindow('Franja 1', '18:00', '21:00')])
+    setDraftWindows([createScheduleWindow('Franja 1', '18:00', '21:00', 10)])
     setCampaignMessage(null)
   }
 
@@ -1023,6 +1138,11 @@ function AdminPanel({
       return
     }
 
+    if (!prizeCategories.length) {
+      setCampaignMessage('Crea al menos una categoria de premio antes de guardar.')
+      return
+    }
+
     if (!draftPrizes.length) {
       setCampaignMessage('Agrega al menos un premio antes de guardar.')
       return
@@ -1040,6 +1160,7 @@ function AdminPanel({
     setCampaignName('')
     setCampaignNotes('')
     setSelectedLocationIds([])
+    setSelectedPrizeCategoryId('')
     setDraftPrizes([])
     setCampaignMessage('Configuracion guardada y activada.')
   }
@@ -1065,7 +1186,7 @@ function AdminPanel({
 
     if (
       nextStatus === 'closed' &&
-      !window.confirm('La accion se cerrara y dejara de aparecer en el listado. Continuar?')
+      !window.confirm('La accion se cerrara y dejara de estar disponible en Inicio. Continuar?')
     ) {
       return
     }
@@ -1131,6 +1252,100 @@ function AdminPanel({
               <span>{location.city}</span>
             </article>
           ))}
+        </div>
+
+        <form className="stack-form" onSubmit={handleCreateIslandSubmit}>
+          <label className="field-group">
+            <span>Nombre de la isla</span>
+            <input
+              value={islandName}
+              onChange={(event) => setIslandName(event.target.value)}
+              placeholder="Ejemplo: Isla 1"
+            />
+          </label>
+
+          {islandMessage ? <p className="form-message">{islandMessage}</p> : null}
+
+          <button className="secondary-button" type="submit">
+            Crear isla
+          </button>
+        </form>
+
+        <div className="location-list">
+          {islands.map((island) => (
+            <article className="mini-panel" key={island.id}>
+              <strong>{island.name}</strong>
+              <span>Isla operativa</span>
+            </article>
+          ))}
+        </div>
+
+        <div className="draft-block">
+          <div className="panel-header">
+            <div>
+              <p className="eyebrow">Categorias de premios</p>
+              <h3 className="subsection-title">Crea el catalogo reusable</h3>
+            </div>
+          </div>
+
+          <form className="stack-form nested-form" onSubmit={handleCreatePrizeCategorySubmit}>
+            <label className="field-group">
+              <span>Nombre de la categoria</span>
+              <input
+                value={categoryName}
+                onChange={(event) => setCategoryName(event.target.value)}
+                placeholder="Ejemplo: Sudadera Mahou"
+              />
+            </label>
+
+            <label className="field-group">
+              <span>Descripcion</span>
+              <textarea
+                rows={2}
+                value={categoryDescription}
+                onChange={(event) => setCategoryDescription(event.target.value)}
+                placeholder="Condicion o copy corto del premio"
+              />
+            </label>
+
+            <label className="field-group">
+              <span>Foto de la categoria</span>
+              <input type="file" accept="image/*" onChange={handleCategoryImageChange} />
+            </label>
+
+            {categoryImageSrc ? (
+              <div className="prize-image-editor">
+                <img className="prize-thumb prize-thumb-large" src={categoryImageSrc} alt="Vista previa de la categoria" />
+                <button className="ghost-button" type="button" onClick={() => setCategoryImageSrc(null)}>
+                  Quitar foto
+                </button>
+              </div>
+            ) : null}
+
+            {categoryMessage ? <p className="form-message">{categoryMessage}</p> : null}
+
+            <button className="secondary-button" type="submit">
+              Crear categoria
+            </button>
+          </form>
+
+          {prizeCategories.length ? (
+            <div className="tag-row tag-row-list">
+              {prizeCategories.map((prizeCategory) => (
+                <article className="tag-card" key={prizeCategory.id}>
+                  {prizeCategory.imageSrc ? (
+                    <img className="prize-thumb" src={prizeCategory.imageSrc} alt={prizeCategory.name} />
+                  ) : null}
+                  <div>
+                    <strong>{prizeCategory.name}</strong>
+                    <p>{prizeCategory.description || 'Categoria reusable para acciones y rutas'}</p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="always-on-box">Crea al menos una categoria para poder configurar premios por accion o ruta.</div>
+          )}
         </div>
       </section>
 
@@ -1202,19 +1417,29 @@ function AdminPanel({
             <div className="panel-header">
               <div>
                 <p className="eyebrow">Bolsa de premios</p>
-                <h3 className="subsection-title">Generar premios para esta configuracion</h3>
+                <h3 className="subsection-title">Asignar categorias a esta configuracion</h3>
               </div>
             </div>
 
             <div className="stack-form nested-form">
               <div className="inline-fields inline-fields-wide">
                 <label className="field-group">
-                  <span>Premio</span>
-                  <input
-                    value={prizeName}
-                    onChange={(event) => setPrizeName(event.target.value)}
-                    placeholder="Ejemplo: Sudadera Mahou"
-                  />
+                  <span>Categoria</span>
+                  <select
+                    value={selectedPrizeCategoryId}
+                    onChange={(event) => setSelectedPrizeCategoryId(event.target.value)}
+                  >
+                    <option value="">
+                      {prizeCategories.length
+                        ? 'Selecciona una categoria de premio'
+                        : 'Crea primero una categoria de premio'}
+                    </option>
+                    {prizeCategories.map((prizeCategory) => (
+                      <option key={prizeCategory.id} value={prizeCategory.id}>
+                        {prizeCategory.name}
+                      </option>
+                    ))}
+                  </select>
                 </label>
 
                 <label className="field-group">
@@ -1255,6 +1480,18 @@ function AdminPanel({
                 </label>
               </div>
 
+              {selectedPrizeCategory ? (
+                <article className="tag-card">
+                  {selectedPrizeCategory.imageSrc ? (
+                    <img className="prize-thumb" src={selectedPrizeCategory.imageSrc} alt={selectedPrizeCategory.name} />
+                  ) : null}
+                  <div>
+                    <strong>{selectedPrizeCategory.name}</strong>
+                    <p>{selectedPrizeCategory.description || 'Categoria seleccionada para esta operativa'}</p>
+                  </div>
+                </article>
+              ) : null}
+
               {campaignType === 'ruta' ? (
                 <div className="always-on-box route-pool-note">
                   La ruta usa un pool de regalos propio e independiente de las ubicaciones.
@@ -1263,35 +1500,16 @@ function AdminPanel({
                 </div>
               ) : null}
 
-              <label className="field-group">
-                <span>Descripcion</span>
-                <textarea
-                  rows={2}
-                  value={prizeDescription}
-                  onChange={(event) => setPrizeDescription(event.target.value)}
-                  placeholder="Condicion o copy corto del premio"
-                />
-              </label>
-
-              <label className="field-group">
-                <span>Foto del premio</span>
-                <input type="file" accept="image/*" onChange={handlePrizeImageChange} />
-              </label>
-
-              {prizeImageSrc ? (
-                <div className="prize-image-editor">
-                  <img className="prize-thumb prize-thumb-large" src={prizeImageSrc} alt="Vista previa del premio" />
-                  <button className="ghost-button" type="button" onClick={() => setPrizeImageSrc(null)}>
-                    Quitar foto
-                  </button>
-                </div>
-              ) : null}
-
               {prizeTimeMode === 'scheduled' ? (
                 <WindowEditor windows={draftWindows} onChange={setDraftWindows} />
               ) : null}
 
-              <button className="secondary-button" type="button" onClick={handleAddDraftPrize}>
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={handleAddDraftPrize}
+                disabled={!prizeCategories.length}
+              >
                 Anadir premio a la bolsa
               </button>
             </div>
@@ -1368,7 +1586,7 @@ function AdminPanel({
         </div>
 
         <div className="campaign-list">
-          {visibleCampaigns.map((campaign) => (
+          {manageableCampaigns.map((campaign) => (
             <article className="campaign-card" key={campaign.id}>
               <div className="campaign-card-head">
                 <div>
@@ -1430,8 +1648,8 @@ function AdminPanel({
             </article>
           ))}
 
-          {visibleCampaigns.length ? null : (
-            <div className="empty-state">No hay acciones visibles. Las cerradas dejan de mostrarse aqui.</div>
+          {manageableCampaigns.length ? null : (
+            <div className="empty-state">No hay acciones o rutas configuradas todavia.</div>
           )}
         </div>
       </section>
@@ -1632,7 +1850,9 @@ function ActivationScreen({
             <p className="eyebrow">Pantalla de ruleta</p>
             <h2 className="section-title">{session.campaignName}</h2>
             <p className="panel-copy">
-              {formatLocationList(session.locationIds, locations)} · {session.promoterNames.join(', ')}
+              {[formatLocationList(session.locationIds, locations), session.islandName, session.promoterNames.join(', ')]
+                .filter(Boolean)
+                .join(' · ')}
             </p>
           </div>
           <div className="activation-toolbar-actions">
