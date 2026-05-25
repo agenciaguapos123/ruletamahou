@@ -561,7 +561,13 @@
 .dashboard-session-panel {
   display: flex;
   flex-direction: column;
+  align-items: center;
+  text-align: center;
   gap: 18px;
+}
+
+.dashboard-session-panel > * {
+  width: min(100%, 1080px);
 }
 
 .session-button-grid,
@@ -571,35 +577,64 @@
 }
 
 .session-button-grid {
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  width: 100%;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 280px));
+  justify-content: center;
 }
 
 .session-menu-button {
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
   padding: 20px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 22px;
   background: rgba(255, 248, 244, 0.08);
   color: #fff8f4;
-  text-align: left;
+  text-align: center;
 }
 
 .activation-main-panel {
   display: flex;
   flex-direction: column;
+  align-items: center;
+  text-align: center;
   gap: 22px;
 }
 
+.activation-main-panel > * {
+  width: min(100%, 1080px);
+}
+
+.activation-main-panel .panel-copy,
+.activation-main-panel .panel-copy strong {
+  text-align: center;
+}
+
+.activation-toolbar {
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+}
+
+.activation-toolbar-actions {
+  justify-content: center;
+}
+
 .activation-roulette-layout {
-  grid-template-columns: minmax(300px, 1fr) minmax(280px, 0.85fr);
-  align-items: center;
+  width: 100%;
+  max-width: 980px;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  align-items: start;
 }
 
 .activation-side,
 .wheel-experience {
   flex-direction: column;
+  align-items: center;
+  width: 100%;
+  text-align: center;
   gap: 18px;
 }
 
@@ -1068,15 +1103,25 @@
   flex-direction: column;
 }
 
+.possible-prize-list {
+  display: grid;
+  width: 100%;
+  max-width: 980px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 280px));
+  justify-content: center;
+}
+
 .possible-prize-card {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 14px;
   padding: 14px 16px;
   border-radius: 20px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(163, 14, 39, 0.88);
   color: #fff8f4;
+  text-align: center;
 }
 
 .possible-prize-card strong {
