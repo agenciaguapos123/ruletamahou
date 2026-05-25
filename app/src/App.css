@@ -519,7 +519,7 @@
 }
 
 .dashboard-menu-panel > * {
-  width: min(100%, 760px);
+  width: min(100%, 980px);
 }
 
 .screen-grid-admin > .panel {

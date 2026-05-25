@@ -715,7 +715,7 @@ function Dashboard({
 
   return (
     <main className="screen-grid dashboard-menu-grid">
-      <section className="panel panel-center dashboard-menu-panel">
+      <section className="panel panel-wide dashboard-menu-panel">
         <p className="eyebrow">Menu de activacion</p>
         <h2 className="section-title">Escoge tu accion y entra en la ruleta.</h2>
 
