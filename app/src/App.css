@@ -522,6 +522,74 @@
   width: min(100%, 760px);
 }
 
+.screen-grid-admin > .panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 20px;
+}
+
+.screen-grid-admin > .panel > * {
+  width: min(100%, 1080px);
+}
+
+.screen-grid-admin .panel-header {
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+}
+
+.screen-grid-admin .stack-form {
+  align-items: center;
+}
+
+.screen-grid-admin .stack-form > * {
+  width: 100%;
+}
+
+.screen-grid-admin .tag-row,
+.screen-grid-admin .location-list,
+.screen-grid-admin .selector-grid {
+  justify-content: center;
+}
+
+.screen-grid-admin .location-list,
+.screen-grid-admin .selector-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 280px));
+}
+
+.screen-grid-admin .location-list .mini-panel,
+.screen-grid-admin .selector-card,
+.screen-grid-admin .tag-card,
+.screen-grid-admin .campaign-card,
+.screen-grid-admin .log-card,
+.screen-grid-admin .empty-state,
+.screen-grid-admin .always-on-box {
+  text-align: center;
+}
+
+.screen-grid-admin .selector-card {
+  align-items: center;
+  justify-content: center;
+}
+
+.screen-grid-admin .campaign-card-head,
+.screen-grid-admin .campaign-card-controls {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.screen-grid-admin .campaign-card-head {
+  flex-direction: column;
+}
+
+.screen-grid-admin .campaign-status-field {
+  width: min(100%, 240px);
+}
+
 .dashboard-access-form {
   flex-direction: column;
   align-items: center;
