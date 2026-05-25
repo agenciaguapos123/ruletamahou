@@ -35,6 +35,8 @@ import {
   saveSessionUser,
 } from './appModel'
 
+const assetPath = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`
+
 function formatLogTimestamp(value: string): string {
   return new Date(value).toLocaleString('es-ES', {
     dateStyle: 'short',
@@ -498,7 +500,7 @@ function App() {
       <div className="ambient ambient-two" />
 
       <header className="topbar topbar-app">
-        <img className="topbar-corner-logo" src="/brands/mahou-logo-white.png" alt="Mahou" />
+        <img className="topbar-corner-logo" src={assetPath('brands/mahou-logo-white.png')} alt="Mahou" />
         <h1 className="hero-title app-shell-title">RULETA DE PREMIOS</h1>
 
         <nav className="topbar-nav topbar-nav-app">
@@ -523,7 +525,7 @@ function App() {
             title="Configuracion"
             onClick={() => navigate('/admin')}
           >
-            <img className="settings-icon" src="/icons/settings.png" alt="" />
+            <img className="settings-icon" src={assetPath('icons/settings.png')} alt="" />
           </button>
         </nav>
       </header>
@@ -609,7 +611,7 @@ function LoginScreen({ onLogin }: { onLogin: (username: string, password: string
       <div className="auth-login-stack">
         <section className="auth-panel auth-login-panel">
           <div className="auth-brand-lockup">
-            <img className="auth-logo" src="/brands/mahou-logo-white.png" alt="Mahou" />
+            <img className="auth-logo" src={assetPath('brands/mahou-logo-white.png')} alt="Mahou" />
             <h1 className="hero-title auth-title">RULETA DE PREMIOS</h1>
           </div>
 
@@ -1664,7 +1666,7 @@ function ActivationScreen({
                 }}
               />
               <div className="wheel-center wheel-center-logo">
-                <img className="wheel-logo-m" src="/brands/mahou-logo-m-white.png" alt="Mahou" />
+                <img className="wheel-logo-m" src={assetPath('brands/mahou-logo-m-white.png')} alt="Mahou" />
               </div>
             </button>
 
@@ -1835,7 +1837,7 @@ function ActivationScreen({
       {splashResult ? (
         <div className="result-splash" role="dialog" aria-modal="true">
           <div className="result-splash-card">
-            <img className="splash-logo" src="/brands/mahou-logo-white.png" alt="Mahou" />
+            <img className="splash-logo" src={assetPath('brands/mahou-logo-white.png')} alt="Mahou" />
             <p className="eyebrow">Resultado</p>
             {splashResult.imageSrc ? (
               <img className="splash-prize-image" src={splashResult.imageSrc} alt={splashResult.name} />
