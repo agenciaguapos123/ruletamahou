@@ -898,15 +898,15 @@ function Dashboard({
   onStartActivation: (campaignId: string, rawPromoters: string, islandId: string) => string | null
 }) {
   const navigate = useNavigate()
+  const [selectedCampaignId, setSelectedCampaignId] = useState('')
+  const [selectedIslandId, setSelectedIslandId] = useState('')
+  const [promoterInput, setPromoterInput] = useState('')
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const activeCampaigns = campaigns.filter((campaign) => campaign.status === 'active')
   const filteredActiveCampaigns = activeCampaigns.filter(
     (campaign) => !selectedIslandId || !campaign.islandId || campaign.islandId === selectedIslandId,
   )
   const liveSessions = sessions.filter((session) => session.status === 'live')
-  const [selectedCampaignId, setSelectedCampaignId] = useState('')
-  const [selectedIslandId, setSelectedIslandId] = useState('')
-  const [promoterInput, setPromoterInput] = useState('')
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   useEffect(() => {
     if (
