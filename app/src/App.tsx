@@ -1663,6 +1663,7 @@ function AdminPanel({
   }
 
   const handleEditCampaignClick = (campaign: Campaign) => {
+    onCloseCampaignBuilder()
     setEditingCampaignId(campaign.id)
     setCampaignName(campaign.name)
     setCampaignType(campaign.type)
@@ -1673,7 +1674,6 @@ function AdminPanel({
     setDraftPrizes(campaign.prizeTemplates.map((prizeTemplate) => clonePrizeTemplateForEditor(prizeTemplate)))
     resetDraftPrizeForm()
     setCampaignMessage(null)
-    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   const handleCancelCampaignEdit = () => {
@@ -1681,6 +1681,24 @@ function AdminPanel({
     onCloseCampaignBuilder()
     setCampaignMessage(null)
   }
+
+  useEffect(() => {
+    if (!editingCampaignId) {
+      return
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        handleCancelCampaignEdit()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [editingCampaignId])
 
   const handleAccessCodeSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -1943,13 +1961,29 @@ function AdminPanel({
       </section>
 
       {isCampaignBuilderOpen || editingCampaignId ? (
-        <section className="panel panel-wide">
+        <>
+          {editingCampaignId ? (
+            <div className="campaign-detail-modal" onClick={handleCancelCampaignEdit} />
+          ) : null}
+
+          <section
+            className={editingCampaignId ? 'panel panel-wide campaign-detail-modal-card' : 'panel panel-wide'}
+            role={editingCampaignId ? 'dialog' : undefined}
+            aria-modal={editingCampaignId ? 'true' : undefined}
+            onClick={editingCampaignId ? (event) => event.stopPropagation() : undefined}
+          >
           <div className="panel-header">
             <div>
               <h2 className="section-title campaign-builder-title">
-                {editingCampaignId ? 'Editar accion o ruta' : 'Crear accion o ruta'}
+                {editingCampaignId ? `Detalle de ${campaignName || 'la operativa'}` : 'Crear accion o ruta'}
               </h2>
             </div>
+
+            {editingCampaignId ? (
+              <button className="ghost-button" type="button" onClick={handleCancelCampaignEdit}>
+                Cerrar detalle
+              </button>
+            ) : null}
           </div>
 
           <form className="stack-form" onSubmit={handleCreateCampaignSubmit}>
@@ -2216,7 +2250,8 @@ function AdminPanel({
             ) : null}
           </div>
           </form>
-        </section>
+          </section>
+        </>
       ) : null}
 
       <section className="panel panel-wide">
@@ -2266,15 +2301,31 @@ function AdminPanel({
 
         <div className="campaign-list">
           {manageableCampaigns.map((campaign) => (
-            <article className="campaign-card" key={campaign.id}>
+            <article
+              className="campaign-card campaign-card-clickable"
+              key={campaign.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => handleEditCampaignClick(campaign)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  handleEditCampaignClick(campaign)
+                }
+              }}
+            >
               <div className="campaign-card-head">
                 <div>
                   <span className="campaign-pill">
                     {campaign.type === 'accion' ? 'Accion' : 'Ruta'}
                   </span>
                   <h3>{campaign.name}</h3>
+                  <span className="mini-label">Pulsa para ver detalle y editar</span>
                 </div>
-                <div className="campaign-card-controls">
+                <div
+                  className="campaign-card-controls"
+                  onClick={(event) => event.stopPropagation()}
+                >
                   <label className="field-group campaign-status-field">
                     <span>Estado</span>
                     <select
@@ -2289,14 +2340,6 @@ function AdminPanel({
                       <option value="closed">Cerrada</option>
                     </select>
                   </label>
-
-                  <button
-                    className="ghost-button"
-                    type="button"
-                    onClick={() => handleEditCampaignClick(campaign)}
-                  >
-                    Editar
-                  </button>
 
                   <button
                     className="ghost-button destructive-button"
