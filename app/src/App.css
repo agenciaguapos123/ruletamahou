@@ -135,9 +135,9 @@
 }
 
 .auth-logo {
-  width: 210px;
+  width: clamp(168px, 24vw, 210px);
   margin-inline: auto;
-  transform: translateX(6px);
+  transform: none;
 }
 
 .auth-brand-lockup {
@@ -149,10 +149,10 @@
 }
 
 .auth-login-panel {
-  width: min(100%, 480px);
+  width: min(100%, 520px);
   align-items: center;
   text-align: center;
-  padding: 40px 32px;
+  padding: clamp(28px, 4vw, 40px) clamp(20px, 4vw, 32px);
 }
 
 .auth-login-panel .stack-form {
@@ -165,11 +165,11 @@
 }
 
 .auth-title {
-  font-size: clamp(1.6rem, 4.8vw, 2.8rem);
+  font-size: clamp(2.2rem, 5vw, 3.1rem);
   line-height: 1;
   letter-spacing: 0.03em;
   text-align: center;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .auth-footer {
@@ -211,9 +211,12 @@
 }
 
 .auth-brand-lockup .auth-title {
-  align-self: stretch;
-  width: 100%;
-  max-width: none;
+  align-self: center;
+  width: fit-content;
+  max-width: 100%;
+  margin-inline: auto;
+  line-height: 0.92;
+  text-wrap: balance;
   transform: none;
 }
 
@@ -1231,7 +1234,7 @@
     max-width: 10ch;
   }
 
-  .auth-title {
-    max-width: none;
+  .auth-brand-lockup .auth-title {
+    width: 100%;
   }
 }
