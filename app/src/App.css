@@ -1329,16 +1329,14 @@
   min-width: 120px;
 }
 
+.refresh-toggle,
 .fullscreen-toggle {
   position: fixed;
-  right: 20px;
   bottom: 20px;
   z-index: 40;
   border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: 18px;
-  width: 56px;
   height: 56px;
-  padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1349,11 +1347,31 @@
   box-shadow: 0 16px 40px rgba(48, 5, 13, 0.28);
 }
 
+.fullscreen-toggle {
+  right: 20px;
+  width: 56px;
+  padding: 0;
+}
+
+.refresh-toggle {
+  left: 20px;
+  gap: 10px;
+  padding: 0 18px;
+  font-weight: 600;
+}
+
 .fullscreen-icon {
   width: 24px;
   height: 24px;
 }
 
+.refresh-icon {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+
+.refresh-toggle:hover,
 .fullscreen-toggle:hover {
   transform: translateY(-1px);
 }
@@ -1431,6 +1449,13 @@
     bottom: 16px;
     width: 52px;
     height: 52px;
+  }
+
+  .refresh-toggle {
+    left: 16px;
+    bottom: 16px;
+    height: 52px;
+    padding: 0 16px;
   }
 
   .hero-title {

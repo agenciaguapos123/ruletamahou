@@ -157,6 +157,67 @@ function FullscreenIcon() {
   )
 }
 
+function RefreshIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="refresh-icon"
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path
+        d="M20 11A8 8 0 1 0 17.66 17M20 11V5M20 11H14"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function RefreshButton() {
+  const handleRefresh = async () => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    try {
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations()
+        await Promise.all(registrations.map((registration) => registration.unregister()))
+      }
+
+      if ('caches' in window) {
+        const cacheNames = await caches.keys()
+        await Promise.all(cacheNames.map((cacheName) => caches.delete(cacheName)))
+      }
+    } catch {
+      // Best effort only. Browsers do not expose a real Ctrl+F5 API.
+    }
+
+    const url = new URL(window.location.href)
+    url.searchParams.set('_refresh', Date.now().toString())
+    window.location.replace(url.toString())
+  }
+
+  return (
+    <button
+      className="refresh-toggle"
+      type="button"
+      onClick={() => {
+        void handleRefresh()
+      }}
+      aria-label="Actualizar pagina"
+      title="Actualizar pagina"
+    >
+      <RefreshIcon />
+      <span>Actualizar</span>
+    </button>
+  )
+}
+
 function FullscreenToggle() {
   const [isFullscreen, setIsFullscreen] = useState(() =>
     Boolean(getFullscreenElement()),
@@ -683,7 +744,12 @@ function App() {
   }
 
   if (!currentUser) {
-    return <LoginScreen onLogin={handleLogin} />
+    return (
+      <>
+        <LoginScreen onLogin={handleLogin} />
+        <RefreshButton />
+      </>
+    )
   }
 
   return (
@@ -801,6 +867,7 @@ function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
 
+      <RefreshButton />
       <FullscreenToggle />
     </div>
   )
