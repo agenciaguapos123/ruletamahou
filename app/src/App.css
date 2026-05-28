@@ -1088,6 +1088,15 @@
   color: rgba(255, 248, 244, 0.82);
 }
 
+.wheel-legal {
+  margin: 2px 0 0;
+  max-width: 34ch;
+  text-align: center;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: rgba(255, 248, 244, 0.74);
+}
+
 .wheel-center span {
   font-size: 0.78rem;
   letter-spacing: 0.18em;

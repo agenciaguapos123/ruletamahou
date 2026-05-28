@@ -3034,6 +3034,8 @@ function ActivationScreen({
                   ? 'Pulsa sobre la ruleta para girar'
                   : 'No hay premios activos en esta franja horaria'}
             </p>
+
+            <p className="wheel-legal">Mahou recomienda el consumo responsable. 5,5º</p>
           </div>
 
           <div className="activation-side">
