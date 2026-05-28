@@ -1,0 +1,15 @@
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /ruleta/
+
+  # Serve existing files/directories directly.
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # SPA fallback.
+  RewriteRule ^ index.html [L]
+</IfModule>
+
+DirectoryIndex index.html
+Options -Indexes
