@@ -378,7 +378,10 @@ function App() {
   const [now, setNow] = useState(() => new Date())
   const [isAppReady, setIsAppReady] = useState(false)
   const [connectionMessage, setConnectionMessage] = useState<string | null>(null)
+  const [isTopbarStockModalOpen, setIsTopbarStockModalOpen] = useState(false)
   const stateSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const secretLogoTapTimeoutRef = useRef<number | null>(null)
+  const secretLogoTapCountRef = useRef(0)
 
   useEffect(() => {
     let isCancelled = false
@@ -478,6 +481,52 @@ function App() {
   }, [location.pathname])
 
   const canAccessAdmin = currentUser?.role === 'admin' || adminUnlocked
+  const pathSegments = location.pathname.split('/').filter(Boolean)
+  const currentActivationSessionId =
+    pathSegments[0] === 'activation' && pathSegments[1] ? pathSegments[1] : null
+  const currentActivationSession = currentActivationSessionId
+    ? appState.sessions.find((session) => session.id === currentActivationSessionId) ?? null
+    : null
+  const currentActivationLivePrizeIds = new Set(
+    currentActivationSession
+      ? getLivePrizes(currentActivationSession, now).map((prize) => prize.templateId)
+      : [],
+  )
+  const currentActivationPrizeSummary = currentActivationSession
+    ? [...currentActivationSession.prizes].sort((left, right) => left.name.localeCompare(right.name, 'es'))
+    : []
+
+  useEffect(() => {
+    if (currentActivationSession) {
+      return
+    }
+
+    setIsTopbarStockModalOpen(false)
+    secretLogoTapCountRef.current = 0
+
+    if (secretLogoTapTimeoutRef.current) {
+      window.clearTimeout(secretLogoTapTimeoutRef.current)
+      secretLogoTapTimeoutRef.current = null
+    }
+  }, [currentActivationSession])
+
+  useEffect(() => {
+    if (!isTopbarStockModalOpen) {
+      return
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsTopbarStockModalOpen(false)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isTopbarStockModalOpen])
 
   const handleLogin = async (username: string, password: string) => {
     try {
@@ -499,6 +548,33 @@ function App() {
     setCurrentUser(null)
     setAdminUnlocked(false)
     navigate('/')
+  }
+
+  const handleTopbarSecretLogoClick = (event: MouseEvent<HTMLButtonElement>) => {
+    if (!currentActivationSession) {
+      return
+    }
+
+    event.preventDefault()
+    event.stopPropagation()
+
+    if (secretLogoTapTimeoutRef.current) {
+      window.clearTimeout(secretLogoTapTimeoutRef.current)
+    }
+
+    secretLogoTapCountRef.current += 1
+
+    if (secretLogoTapCountRef.current >= 3) {
+      secretLogoTapCountRef.current = 0
+      secretLogoTapTimeoutRef.current = null
+      setIsTopbarStockModalOpen(true)
+      return
+    }
+
+    secretLogoTapTimeoutRef.current = window.setTimeout(() => {
+      secretLogoTapCountRef.current = 0
+      secretLogoTapTimeoutRef.current = null
+    }, 700)
   }
 
   const updateSession = (
@@ -907,7 +983,18 @@ function App() {
       <div className="ambient ambient-two" />
 
       <header className="topbar topbar-app">
-        <img className="topbar-corner-logo" src={assetPath('brands/mahou-logo-white.png')} alt="Mahou" />
+        {currentActivationSession ? (
+          <button
+            className="topbar-corner-logo-button"
+            type="button"
+            onClick={handleTopbarSecretLogoClick}
+            aria-label="Abrir estado secreto del stock"
+          >
+            <img className="topbar-corner-logo" src={assetPath('brands/mahou-logo-white.png')} alt="Mahou" />
+          </button>
+        ) : (
+          <img className="topbar-corner-logo" src={assetPath('brands/mahou-logo-white.png')} alt="Mahou" />
+        )}
         <h1 className="hero-title app-shell-title">RULETA DE PREMIOS</h1>
 
         <nav className="topbar-nav topbar-nav-app">
@@ -1020,6 +1107,72 @@ function App() {
         />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+
+      {currentActivationSession && isTopbarStockModalOpen ? (
+        <>
+          <div className="campaign-detail-modal" onClick={() => setIsTopbarStockModalOpen(false)} />
+          <section
+            aria-labelledby="secret-stock-title"
+            aria-modal="true"
+            className="panel campaign-detail-modal-card secret-stock-modal-card"
+            role="dialog"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Acceso oculto</p>
+                <h2 className="section-title" id="secret-stock-title">
+                  Stock restante de {currentActivationSession.campaignType === 'accion' ? 'la accion' : 'la ruta'}
+                </h2>
+              </div>
+              <button className="ghost-button" type="button" onClick={() => setIsTopbarStockModalOpen(false)}>
+                Cerrar
+              </button>
+            </div>
+
+            <p className="panel-copy">
+              {currentActivationSession.campaignName} · {formatLocationList(currentActivationSession.locationIds, appState.locations)}
+            </p>
+
+            <div className="secret-stock-list">
+              {currentActivationPrizeSummary.length ? (
+                currentActivationPrizeSummary.map((prize) => (
+                  <article className="secret-stock-card" key={prize.templateId}>
+                    {prize.imageSrc ? (
+                      <img className="possible-prize-thumb" src={prize.imageSrc} alt={prize.name} />
+                    ) : null}
+
+                    <div className="secret-stock-copy">
+                      <strong>{prize.name}</strong>
+                      <span>
+                        Quedan {prize.remainingStock} de {prize.totalStock}
+                      </span>
+                    </div>
+
+                    <span
+                      className={
+                        prize.remainingStock <= 0
+                          ? 'status-chip'
+                          : currentActivationLivePrizeIds.has(prize.templateId)
+                            ? 'status-chip accent'
+                            : 'status-chip'
+                      }
+                    >
+                      {prize.remainingStock <= 0
+                        ? 'Agotado'
+                        : currentActivationLivePrizeIds.has(prize.templateId)
+                          ? 'Activo ahora'
+                          : 'Disponible mas tarde'}
+                    </span>
+                  </article>
+                ))
+              ) : (
+                <div className="empty-state">No hay categorias de premio configuradas en esta operativa.</div>
+              )}
+            </div>
+          </section>
+        </>
+      ) : null}
 
       <RefreshButton />
       <FullscreenToggle />
@@ -2926,17 +3079,10 @@ function ActivationScreen({
 }) {
   const navigate = useNavigate()
   const timeoutRef = useRef<number | null>(null)
-  const secretTapTimeoutRef = useRef<number | null>(null)
-  const secretTapCountRef = useRef(0)
   const livePrizes = getLivePrizes(session, now)
-  const livePrizeIds = new Set(livePrizes.map((prize) => prize.templateId))
-  const remainingPrizeSummary = [...session.prizes].sort((left, right) =>
-    left.name.localeCompare(right.name, 'es'),
-  )
   const [spinDegrees, setSpinDegrees] = useState(0)
   const [isSpinning, setIsSpinning] = useState(false)
   const [isManualConfigOpen, setIsManualConfigOpen] = useState(false)
-  const [isStockModalOpen, setIsStockModalOpen] = useState(false)
   const [splashResult, setSplashResult] = useState<{
     name: string
     imageSrc: string | null
@@ -2947,30 +3093,8 @@ function ActivationScreen({
       if (timeoutRef.current) {
         window.clearTimeout(timeoutRef.current)
       }
-
-      if (secretTapTimeoutRef.current) {
-        window.clearTimeout(secretTapTimeoutRef.current)
-      }
     }
   }, [])
-
-  useEffect(() => {
-    if (!isStockModalOpen) {
-      return
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setIsStockModalOpen(false)
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [isStockModalOpen])
 
   const handleSpin = () => {
     if (isSpinning || !livePrizes.length) {
@@ -3006,28 +3130,6 @@ function ActivationScreen({
     }
 
     onFinishSession(session.id)
-  }
-
-  const handleSecretLogoClick = (event: MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault()
-    event.stopPropagation()
-
-    if (secretTapTimeoutRef.current) {
-      window.clearTimeout(secretTapTimeoutRef.current)
-    }
-
-    secretTapCountRef.current += 1
-
-    if (secretTapCountRef.current >= 3) {
-      secretTapCountRef.current = 0
-      setIsStockModalOpen(true)
-      return
-    }
-
-    secretTapTimeoutRef.current = window.setTimeout(() => {
-      secretTapCountRef.current = 0
-      secretTapTimeoutRef.current = null
-    }, 700)
   }
 
   return (
@@ -3076,14 +3178,9 @@ function ActivationScreen({
                 />
               </button>
 
-              <button
-                className="wheel-center wheel-center-logo wheel-secret-trigger"
-                type="button"
-                onClick={handleSecretLogoClick}
-                aria-label="Abrir estado secreto del stock"
-              >
+              <div className="wheel-center wheel-center-logo">
                 <img className="wheel-logo-m" src={assetPath('brands/mahou-logo-m-white.png')} alt="Mahou" />
-              </button>
+              </div>
             </div>
 
             <p className="wheel-hint">
@@ -3117,72 +3214,6 @@ function ActivationScreen({
           </div>
         </div>
       </section>
-
-      {isStockModalOpen ? (
-        <>
-          <div className="campaign-detail-modal" onClick={() => setIsStockModalOpen(false)} />
-          <section
-            aria-labelledby="secret-stock-title"
-            aria-modal="true"
-            className="panel campaign-detail-modal-card secret-stock-modal-card"
-            role="dialog"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="panel-header">
-              <div>
-                <p className="eyebrow">Acceso oculto</p>
-                <h2 className="section-title" id="secret-stock-title">
-                  Stock restante de {session.campaignType === 'accion' ? 'la accion' : 'la ruta'}
-                </h2>
-              </div>
-              <button className="ghost-button" type="button" onClick={() => setIsStockModalOpen(false)}>
-                Cerrar
-              </button>
-            </div>
-
-            <p className="panel-copy">
-              {session.campaignName} · {formatLocationList(session.locationIds, locations)}
-            </p>
-
-            <div className="secret-stock-list">
-              {remainingPrizeSummary.length ? (
-                remainingPrizeSummary.map((prize) => (
-                  <article className="secret-stock-card" key={prize.templateId}>
-                    {prize.imageSrc ? (
-                      <img className="possible-prize-thumb" src={prize.imageSrc} alt={prize.name} />
-                    ) : null}
-
-                    <div className="secret-stock-copy">
-                      <strong>{prize.name}</strong>
-                      <span>
-                        Quedan {prize.remainingStock} de {prize.totalStock}
-                      </span>
-                    </div>
-
-                    <span
-                      className={
-                        prize.remainingStock <= 0
-                          ? 'status-chip'
-                          : livePrizeIds.has(prize.templateId)
-                            ? 'status-chip accent'
-                            : 'status-chip'
-                      }
-                    >
-                      {prize.remainingStock <= 0
-                        ? 'Agotado'
-                        : livePrizeIds.has(prize.templateId)
-                          ? 'Activo ahora'
-                          : 'Disponible mas tarde'}
-                    </span>
-                  </article>
-                ))
-              ) : (
-                <div className="empty-state">No hay categorias de premio configuradas en esta operativa.</div>
-              )}
-            </div>
-          </section>
-        </>
-      ) : null}
 
       {canManageSession ? (
         <section className="panel panel-wide">
