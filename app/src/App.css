@@ -1072,6 +1072,19 @@
   background: #c8102e;
 }
 
+.wheel-secret-trigger {
+  cursor: pointer;
+}
+
+.wheel-secret-trigger:hover {
+  transform: translate(-50%, -50%) scale(1.02);
+}
+
+.wheel-secret-trigger:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(255, 248, 244, 0.18);
+}
+
 .wheel-logo-m,
 .splash-logo {
   display: block;
@@ -1293,6 +1306,39 @@
   max-height: calc(100vh - 48px);
   overflow-y: auto;
   transform: translateX(-50%);
+}
+
+.secret-stock-modal-card {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.secret-stock-list {
+  display: grid;
+  gap: 14px;
+}
+
+.secret-stock-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 248, 244, 0.08);
+}
+
+.secret-stock-copy {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.secret-stock-copy span {
+  color: rgba(255, 248, 244, 0.78);
 }
 
 .destructive-button {

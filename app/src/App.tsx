@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, useEffect, useRef, useState } from 'react'
+import { ChangeEvent, FormEvent, MouseEvent, useEffect, useRef, useState } from 'react'
 import {
   Navigate,
   Route,
@@ -2926,10 +2926,17 @@ function ActivationScreen({
 }) {
   const navigate = useNavigate()
   const timeoutRef = useRef<number | null>(null)
+  const secretTapTimeoutRef = useRef<number | null>(null)
+  const secretTapCountRef = useRef(0)
   const livePrizes = getLivePrizes(session, now)
+  const livePrizeIds = new Set(livePrizes.map((prize) => prize.templateId))
+  const remainingPrizeSummary = [...session.prizes].sort((left, right) =>
+    left.name.localeCompare(right.name, 'es'),
+  )
   const [spinDegrees, setSpinDegrees] = useState(0)
   const [isSpinning, setIsSpinning] = useState(false)
   const [isManualConfigOpen, setIsManualConfigOpen] = useState(false)
+  const [isStockModalOpen, setIsStockModalOpen] = useState(false)
   const [splashResult, setSplashResult] = useState<{
     name: string
     imageSrc: string | null
@@ -2940,8 +2947,30 @@ function ActivationScreen({
       if (timeoutRef.current) {
         window.clearTimeout(timeoutRef.current)
       }
+
+      if (secretTapTimeoutRef.current) {
+        window.clearTimeout(secretTapTimeoutRef.current)
+      }
     }
   }, [])
+
+  useEffect(() => {
+    if (!isStockModalOpen) {
+      return
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsStockModalOpen(false)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isStockModalOpen])
 
   const handleSpin = () => {
     if (isSpinning || !livePrizes.length) {
@@ -2979,6 +3008,28 @@ function ActivationScreen({
     onFinishSession(session.id)
   }
 
+  const handleSecretLogoClick = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+
+    if (secretTapTimeoutRef.current) {
+      window.clearTimeout(secretTapTimeoutRef.current)
+    }
+
+    secretTapCountRef.current += 1
+
+    if (secretTapCountRef.current >= 3) {
+      secretTapCountRef.current = 0
+      setIsStockModalOpen(true)
+      return
+    }
+
+    secretTapTimeoutRef.current = window.setTimeout(() => {
+      secretTapCountRef.current = 0
+      secretTapTimeoutRef.current = null
+    }, 700)
+  }
+
   return (
     <main className="screen-grid screen-grid-activation">
       <section className="panel panel-wide activation-main-panel">
@@ -3007,25 +3058,33 @@ function ActivationScreen({
 
         <div className="activation-roulette-layout">
           <div className="wheel-experience">
-            <button
-              className="wheel-trigger"
-              type="button"
-              disabled={!livePrizes.length || isSpinning}
-              onClick={handleSpin}
-              aria-label="Pulsa la ruleta para girar"
-            >
-              <span className="wheel-pointer" />
-              <div
-                className="wheel"
-                style={{
-                  backgroundImage: buildWheelGradient(12),
-                  transform: `rotate(${spinDegrees}deg)`,
-                }}
-              />
-              <div className="wheel-center wheel-center-logo">
+            <div className="wheel-frame">
+              <button
+                className="wheel-trigger"
+                type="button"
+                disabled={!livePrizes.length || isSpinning}
+                onClick={handleSpin}
+                aria-label="Pulsa la ruleta para girar"
+              >
+                <span className="wheel-pointer" />
+                <div
+                  className="wheel"
+                  style={{
+                    backgroundImage: buildWheelGradient(12),
+                    transform: `rotate(${spinDegrees}deg)`,
+                  }}
+                />
+              </button>
+
+              <button
+                className="wheel-center wheel-center-logo wheel-secret-trigger"
+                type="button"
+                onClick={handleSecretLogoClick}
+                aria-label="Abrir estado secreto del stock"
+              >
                 <img className="wheel-logo-m" src={assetPath('brands/mahou-logo-m-white.png')} alt="Mahou" />
-              </div>
-            </button>
+              </button>
+            </div>
 
             <p className="wheel-hint">
               {isSpinning
@@ -3053,13 +3112,77 @@ function ActivationScreen({
                     <strong>{prize.name}</strong>
                   </article>
                 ))
-              ) : (
-                <div className="always-on-box">No hay premios posibles en esta franja.</div>
-              )}
+              ) : null}
             </div>
           </div>
         </div>
       </section>
+
+      {isStockModalOpen ? (
+        <>
+          <div className="campaign-detail-modal" onClick={() => setIsStockModalOpen(false)} />
+          <section
+            aria-labelledby="secret-stock-title"
+            aria-modal="true"
+            className="panel campaign-detail-modal-card secret-stock-modal-card"
+            role="dialog"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Acceso oculto</p>
+                <h2 className="section-title" id="secret-stock-title">
+                  Stock restante de {session.campaignType === 'accion' ? 'la accion' : 'la ruta'}
+                </h2>
+              </div>
+              <button className="ghost-button" type="button" onClick={() => setIsStockModalOpen(false)}>
+                Cerrar
+              </button>
+            </div>
+
+            <p className="panel-copy">
+              {session.campaignName} · {formatLocationList(session.locationIds, locations)}
+            </p>
+
+            <div className="secret-stock-list">
+              {remainingPrizeSummary.length ? (
+                remainingPrizeSummary.map((prize) => (
+                  <article className="secret-stock-card" key={prize.templateId}>
+                    {prize.imageSrc ? (
+                      <img className="possible-prize-thumb" src={prize.imageSrc} alt={prize.name} />
+                    ) : null}
+
+                    <div className="secret-stock-copy">
+                      <strong>{prize.name}</strong>
+                      <span>
+                        Quedan {prize.remainingStock} de {prize.totalStock}
+                      </span>
+                    </div>
+
+                    <span
+                      className={
+                        prize.remainingStock <= 0
+                          ? 'status-chip'
+                          : livePrizeIds.has(prize.templateId)
+                            ? 'status-chip accent'
+                            : 'status-chip'
+                      }
+                    >
+                      {prize.remainingStock <= 0
+                        ? 'Agotado'
+                        : livePrizeIds.has(prize.templateId)
+                          ? 'Activo ahora'
+                          : 'Disponible mas tarde'}
+                    </span>
+                  </article>
+                ))
+              ) : (
+                <div className="empty-state">No hay categorias de premio configuradas en esta operativa.</div>
+              )}
+            </div>
+          </section>
+        </>
+      ) : null}
 
       {canManageSession ? (
         <section className="panel panel-wide">
