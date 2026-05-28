@@ -439,6 +439,61 @@ export function createDefaultState(): AppState {
   }
 }
 
+function normalizeStoredAppState(parsedState: Partial<AppState>): AppState {
+  const defaultState = createDefaultState()
+  const campaigns = Array.isArray(parsedState.campaigns)
+    ? parsedState.campaigns.map((campaign) =>
+        normalizeCampaign(campaign as Campaign & { isEnabled?: boolean }),
+      )
+    : defaultState.campaigns
+  const derivedPrizeCategories = derivePrizeCategoriesFromCampaigns(campaigns)
+  const prizeCategories = Array.isArray(parsedState.prizeCategories)
+    ? parsedState.prizeCategories.map((prizeCategory) =>
+        normalizePrizeCategory(prizeCategory as PrizeCategory),
+      )
+    : derivedPrizeCategories.length
+      ? derivedPrizeCategories
+      : defaultState.prizeCategories
+
+  return {
+    users: Array.isArray(parsedState.users) && parsedState.users.length
+      ? parsedState.users
+      : defaultState.users,
+    adminAccessCode:
+      typeof parsedState.adminAccessCode === 'string'
+        ? parsedState.adminAccessCode
+        : defaultState.adminAccessCode,
+    locations: Array.isArray(parsedState.locations)
+      ? parsedState.locations
+      : defaultState.locations,
+    islands: Array.isArray(parsedState.islands)
+      ? parsedState.islands
+      : defaultState.islands,
+    prizeCategories,
+    campaigns,
+    sessions: Array.isArray(parsedState.sessions)
+      ? parsedState.sessions.map((session) =>
+          normalizeActivationSession(session as ActivationSession),
+        )
+      : [],
+  }
+}
+
+export function importAppState(rawState: string): AppState {
+  const parsedValue = JSON.parse(rawState) as Partial<AppState> | { state?: Partial<AppState> }
+
+  if (!parsedValue || typeof parsedValue !== 'object') {
+    throw new Error('Invalid backup payload.')
+  }
+
+  const nextState =
+    'state' in parsedValue && parsedValue.state && typeof parsedValue.state === 'object'
+      ? parsedValue.state
+      : parsedValue
+
+  return normalizeStoredAppState(nextState as Partial<AppState>)
+}
+
 export function loadAppState(): AppState {
   if (typeof window === 'undefined') {
     return createDefaultState()
@@ -452,43 +507,7 @@ export function loadAppState(): AppState {
     }
 
     const parsedState = JSON.parse(rawState) as Partial<AppState>
-    const defaultState = createDefaultState()
-    const campaigns = Array.isArray(parsedState.campaigns)
-      ? parsedState.campaigns.map((campaign) =>
-          normalizeCampaign(campaign as Campaign & { isEnabled?: boolean }),
-        )
-      : defaultState.campaigns
-    const derivedPrizeCategories = derivePrizeCategoriesFromCampaigns(campaigns)
-    const prizeCategories = Array.isArray(parsedState.prizeCategories)
-      ? parsedState.prizeCategories.map((prizeCategory) =>
-          normalizePrizeCategory(prizeCategory as PrizeCategory),
-        )
-      : derivedPrizeCategories.length
-        ? derivedPrizeCategories
-        : defaultState.prizeCategories
-
-    return {
-      users: Array.isArray(parsedState.users) && parsedState.users.length
-        ? parsedState.users
-        : defaultState.users,
-      adminAccessCode:
-        typeof parsedState.adminAccessCode === 'string'
-          ? parsedState.adminAccessCode
-          : defaultState.adminAccessCode,
-      locations: Array.isArray(parsedState.locations)
-        ? parsedState.locations
-        : defaultState.locations,
-      islands: Array.isArray(parsedState.islands)
-        ? parsedState.islands
-        : defaultState.islands,
-      prizeCategories,
-      campaigns,
-      sessions: Array.isArray(parsedState.sessions)
-        ? parsedState.sessions.map((session) =>
-            normalizeActivationSession(session as ActivationSession),
-          )
-        : [],
-    }
+    return normalizeStoredAppState(parsedState)
   } catch {
     return createDefaultState()
   }

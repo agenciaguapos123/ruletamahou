@@ -9,6 +9,12 @@ import {
 } from 'react-router-dom'
 import './App.css'
 import {
+  bootstrapSession,
+  loginWithPassword,
+  logoutFromServer,
+  saveRemoteAppState,
+} from './appApi'
+import {
   ActivationPrize,
   ActivationSpinLog,
   ActivationSession,
@@ -25,17 +31,15 @@ import {
   ScheduleWindow,
   buildActivationSession,
   buildPrizeTemplateFromCategory,
+  createDefaultState,
   createId,
   createScheduleWindow,
   drawPrize,
   formatLocationList,
   getLivePrizes,
+  importAppState,
   isWindowActive,
-  loadAppState,
-  loadSessionUser,
   parsePromoters,
-  saveAppState,
-  saveSessionUser,
 } from './appModel'
 
 const assetPath = (path: string) => `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`
@@ -353,21 +357,73 @@ function FullscreenToggle() {
 function App() {
   const navigate = useNavigate()
   const location = useLocation()
-  const [appState, setAppState] = useState<AppState>(() => loadAppState())
-  const [currentUser, setCurrentUser] = useState<AppUser | null>(() =>
-    loadSessionUser(loadAppState()),
-  )
+  const [appState, setAppState] = useState<AppState>(() => createDefaultState())
+  const [currentUser, setCurrentUser] = useState<AppUser | null>(null)
   const [adminUnlocked, setAdminUnlocked] = useState(false)
   const [campaignBuilderOpen, setCampaignBuilderOpen] = useState(false)
   const [now, setNow] = useState(() => new Date())
+  const [isAppReady, setIsAppReady] = useState(false)
+  const [connectionMessage, setConnectionMessage] = useState<string | null>(null)
+  const stateSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
 
   useEffect(() => {
-    saveAppState(appState)
-  }, [appState])
+    let isCancelled = false
+
+    void (async () => {
+      try {
+        const sessionPayload = await bootstrapSession()
+
+        if (isCancelled) {
+          return
+        }
+
+        if (sessionPayload.authenticated && sessionPayload.user && sessionPayload.state) {
+          setAppState(sessionPayload.state)
+          setCurrentUser(sessionPayload.user)
+          setAdminUnlocked(sessionPayload.user.role === 'admin')
+        } else {
+          setCurrentUser(null)
+          setAdminUnlocked(false)
+        }
+
+        setConnectionMessage(null)
+      } catch {
+        if (isCancelled) {
+          return
+        }
+
+        setCurrentUser(null)
+        setAdminUnlocked(false)
+        setConnectionMessage('No se pudo conectar con la base de datos.')
+      } finally {
+        if (!isCancelled) {
+          setIsAppReady(true)
+        }
+      }
+    })()
+
+    return () => {
+      isCancelled = true
+    }
+  }, [])
 
   useEffect(() => {
-    saveSessionUser(currentUser)
-  }, [currentUser])
+    if (!isAppReady || !currentUser) {
+      return
+    }
+
+    const nextState = appState
+
+    stateSaveQueueRef.current = stateSaveQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        await saveRemoteAppState(nextState)
+        setConnectionMessage(null)
+      })
+      .catch(() => {
+        setConnectionMessage('No se pudieron guardar los cambios en la base de datos.')
+      })
+  }, [appState, currentUser, isAppReady])
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -409,24 +465,23 @@ function App() {
 
   const canAccessAdmin = currentUser?.role === 'admin' || adminUnlocked
 
-  const handleLogin = (username: string, password: string) => {
-    const normalizedUsername = username.trim().toLowerCase()
-    const user = appState.users.find(
-      (entry) =>
-        entry.username.toLowerCase() === normalizedUsername && entry.password === password,
-    )
+  const handleLogin = async (username: string, password: string) => {
+    try {
+      const loginResult = await loginWithPassword(username, password)
 
-    if (!user) {
-      return 'Usuario o contrasena incorrectos.'
+      setAppState(loginResult.state)
+      setCurrentUser(loginResult.user)
+      setAdminUnlocked(loginResult.user.role === 'admin')
+      setConnectionMessage(null)
+      navigate('/')
+      return null
+    } catch (error) {
+      return error instanceof Error ? error.message : 'No se pudo iniciar sesion.'
     }
-
-    setCurrentUser(user)
-    setAdminUnlocked(user.role === 'admin')
-    navigate('/')
-    return null
   }
 
   const handleLogout = () => {
+    void logoutFromServer().catch(() => undefined)
     setCurrentUser(null)
     setAdminUnlocked(false)
     navigate('/')
@@ -736,6 +791,41 @@ function App() {
     return null
   }
 
+  const handleExportAppState = () => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') {
+      return
+    }
+
+    const stamp = new Date().toISOString().replace(/[:]/g, '-').replace(/\..+$/, '')
+    const backupPayload = {
+      exportedAt: new Date().toISOString(),
+      source: 'ruleta-mahou',
+      state: appState,
+    }
+    const blob = new Blob([JSON.stringify(backupPayload, null, 2)], {
+      type: 'application/json',
+    })
+    const downloadUrl = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+
+    link.href = downloadUrl
+    link.download = `ruleta-mahou-backup-${stamp}.json`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(downloadUrl)
+  }
+
+  const handleImportAppState = (rawState: string) => {
+    try {
+      const nextState = importAppState(rawState)
+      setAppState(nextState)
+      return null
+    } catch {
+      return 'No se pudo restaurar el respaldo. Revisa el archivo JSON.'
+    }
+  }
+
   const handleOpenCampaignBuilder = () => {
     setCampaignBuilderOpen(true)
     navigate('/admin/routes')
@@ -771,12 +861,18 @@ function App() {
     onUpdateCampaignStatus: handleUpdateCampaignStatus,
     onDeleteCampaign: handleDeleteCampaign,
     onUpdateAdminAccessCode: handleUpdateAdminAccessCode,
+    onExportAppState: handleExportAppState,
+    onImportAppState: handleImportAppState,
+  }
+
+  if (!isAppReady) {
+    return <LoadingScreen message={connectionMessage} />
   }
 
   if (!currentUser) {
     return (
       <>
-        <LoginScreen onLogin={handleLogin} />
+        <LoginScreen onLogin={handleLogin} externalMessage={connectionMessage} />
         <RefreshButton />
       </>
     )
@@ -840,6 +936,8 @@ function App() {
           </button>
         </nav>
       </header>
+
+      {connectionMessage ? <div className="sync-banner">{connectionMessage}</div> : null}
 
       <Routes>
         <Route
@@ -908,14 +1006,37 @@ function App() {
 
 export default App
 
-function LoginScreen({ onLogin }: { onLogin: (username: string, password: string) => string | null }) {
+function LoadingScreen({ message }: { message?: string | null }) {
+  return (
+    <main className="screen-grid">
+      <section className="panel panel-center">
+        <p className="eyebrow">Base de datos</p>
+        <h2 className="section-title">Cargando datos de la ruleta.</h2>
+        <p className="panel-copy">
+          {message ?? 'Sincronizando configuracion, premios y activaciones con el servidor.'}
+        </p>
+      </section>
+    </main>
+  )
+}
+
+function LoginScreen({
+  onLogin,
+  externalMessage,
+}: {
+  onLogin: (username: string, password: string) => Promise<string | null>
+  externalMessage?: string | null
+}) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const result = onLogin(username, password)
+    setIsSubmitting(true)
+    const result = await onLogin(username, password)
+    setIsSubmitting(false)
 
     if (result) {
       setErrorMessage(result)
@@ -958,9 +1079,10 @@ function LoginScreen({ onLogin }: { onLogin: (username: string, password: string
             </label>
 
             {errorMessage ? <p className="form-error">{errorMessage}</p> : null}
+            {!errorMessage && externalMessage ? <p className="form-error">{externalMessage}</p> : null}
 
-            <button className="primary-button" type="submit">
-              Acceder
+            <button className="primary-button" type="submit" disabled={isSubmitting}>
+              {isSubmitting ? 'Accediendo...' : 'Acceder'}
             </button>
           </form>
         </section>
@@ -1251,6 +1373,8 @@ function AdminPanel({
   onUpdateCampaignStatus,
   onDeleteCampaign,
   onUpdateAdminAccessCode,
+  onExportAppState,
+  onImportAppState,
 }: {
   view: AdminPanelView
   currentUser: AppUser
@@ -1276,6 +1400,8 @@ function AdminPanel({
   onUpdateCampaignStatus: (campaignId: string, nextStatus: CampaignStatus) => void
   onUpdateAdminAccessCode: (currentCode: string, nextCode: string) => string | null
   onDeleteCampaign: (campaignId: string) => void
+  onExportAppState: () => void
+  onImportAppState: (rawState: string) => string | null
 }) {
   const [locationName, setLocationName] = useState('')
   const [locationCity, setLocationCity] = useState('')
@@ -1306,6 +1432,7 @@ function AdminPanel({
   const [accessCodeCurrent, setAccessCodeCurrent] = useState('')
   const [accessCodeNext, setAccessCodeNext] = useState('')
   const [accessCodeMessage, setAccessCodeMessage] = useState<string | null>(null)
+  const [backupMessage, setBackupMessage] = useState<string | null>(null)
   const isSettingsView = view === 'settings'
   const isRoutesView = view === 'routes'
   const manageableCampaigns = campaigns
@@ -1824,6 +1951,36 @@ function AdminPanel({
     setAccessCodeCurrent('')
     setAccessCodeNext('')
     setAccessCodeMessage('Clave admin actualizada.')
+  }
+
+  const handleImportBackupChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const input = event.target
+    const file = input.files?.[0]
+
+    if (!file) {
+      return
+    }
+
+    if (!window.confirm('Se reemplazara la configuracion actual por el respaldo importado. Continuar?')) {
+      input.value = ''
+      return
+    }
+
+    try {
+      const rawState = await file.text()
+      const result = onImportAppState(rawState)
+
+      setBackupMessage(result ?? 'Respaldo restaurado correctamente.')
+    } catch {
+      setBackupMessage('No se pudo leer el archivo seleccionado.')
+    }
+
+    input.value = ''
+  }
+
+  const handleExportBackupClick = () => {
+    onExportAppState()
+    setBackupMessage('Respaldo descargado correctamente.')
   }
 
   const handleCampaignStatusChange = (campaign: Campaign, nextStatus: CampaignStatus) => {
@@ -2374,6 +2531,7 @@ function AdminPanel({
       ) : null}
 
       {isSettingsView ? (
+      <>
       <section className="panel panel-wide">
         <div className="panel-header">
           <div>
@@ -2410,6 +2568,35 @@ function AdminPanel({
           </button>
         </form>
       </section>
+
+      <section className="panel panel-wide">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Respaldo</p>
+            <h2 className="section-title">Guardar y restaurar datos</h2>
+          </div>
+        </div>
+
+        <div className="stack-form">
+          <p className="panel-copy">
+            Descarga un JSON con premios, fotos, operativas y logs antes de tocar la app o hacer despliegues.
+          </p>
+
+          <div className="card-action-row">
+            <button className="secondary-button" type="button" onClick={handleExportBackupClick}>
+              Descargar respaldo
+            </button>
+          </div>
+
+          <label className="field-group">
+            <span>Restaurar desde archivo JSON</span>
+            <input type="file" accept="application/json,.json" onChange={handleImportBackupChange} />
+          </label>
+
+          {backupMessage ? <p className="form-message">{backupMessage}</p> : null}
+        </div>
+      </section>
+      </>
       ) : null}
 
       {isRoutesView ? (

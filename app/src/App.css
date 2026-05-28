@@ -648,6 +648,17 @@
   width: min(100%, 1080px);
 }
 
+.sync-banner {
+  width: min(100%, 1080px);
+  margin: 0 auto;
+  padding: 14px 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 209, 215, 0.28);
+  background: rgba(121, 18, 35, 0.22);
+  color: #fff1f3;
+  text-align: center;
+}
+
 .session-button-grid,
 .activation-roulette-layout {
   display: grid;
