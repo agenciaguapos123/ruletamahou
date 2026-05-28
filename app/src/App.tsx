@@ -3230,6 +3230,24 @@ function WindowEditor({
     )
   }
 
+  const renderWindowToggle = (
+    label: string,
+    checked: boolean,
+    onToggle: () => void,
+  ) => (
+    <button
+      aria-pressed={checked}
+      className={checked ? 'window-toggle-button window-toggle-button-active' : 'window-toggle-button'}
+      type="button"
+      onClick={onToggle}
+    >
+      <span className="window-toggle-icon" aria-hidden="true">
+        {checked ? '[X]' : '[ ]'}
+      </span>
+      <span>{label}</span>
+    </button>
+  )
+
   return (
     <div className="window-editor">
       <div className="window-list">
@@ -3278,23 +3296,17 @@ function WindowEditor({
               />
             </label>
 
-            <label className="field-group field-toggle compact-toggle">
-              <span>On</span>
-              <input
-                type="checkbox"
-                checked={windowSlot.enabled}
-                onChange={(event) => updateWindow(windowSlot.id, { enabled: event.target.checked })}
-              />
-            </label>
+            {renderWindowToggle(
+              windowSlot.enabled ? 'Franja activa' : 'Franja desactivada',
+              windowSlot.enabled,
+              () => updateWindow(windowSlot.id, { enabled: !windowSlot.enabled }),
+            )}
 
-            <label className="field-group field-toggle compact-toggle window-carry-toggle">
-              <span>Arrastrar sobrante</span>
-              <input
-                type="checkbox"
-                checked={windowSlot.carryOver}
-                onChange={(event) => updateWindow(windowSlot.id, { carryOver: event.target.checked })}
-              />
-            </label>
+            {renderWindowToggle(
+              windowSlot.carryOver ? 'Arrastra sobrante' : 'No arrastra sobrante',
+              windowSlot.carryOver,
+              () => updateWindow(windowSlot.id, { carryOver: !windowSlot.carryOver }),
+            )}
 
             <button
               className="icon-button"
