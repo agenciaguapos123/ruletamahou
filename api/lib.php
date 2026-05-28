@@ -108,16 +108,19 @@ function build_default_state(): array
                 'id' => 'location-mercado-san-ildefonso',
                 'name' => 'Mercado de San Ildefonso',
                 'city' => 'Madrid',
+                'islandId' => 'island-1',
             ],
             [
                 'id' => 'location-la-tape',
                 'name' => 'La Tape',
                 'city' => 'Madrid',
+                'islandId' => 'island-2',
             ],
             [
                 'id' => 'location-sala-mon',
                 'name' => 'Sala Mon',
                 'city' => 'Madrid',
+                'islandId' => 'island-2',
             ],
         ],
         'islands' => [
@@ -203,7 +206,6 @@ function build_default_state(): array
                 'locationIds' => [
                     'location-la-tape',
                     'location-sala-mon',
-                    'location-mercado-san-ildefonso',
                 ],
                 'status' => 'active',
                 'prizeTemplates' => [
@@ -248,6 +250,57 @@ function build_default_state(): array
 function normalize_state(array $state): array
 {
     $defaultState = build_default_state();
+    $campaigns = isset($state['campaigns']) && is_array($state['campaigns'])
+        ? array_values($state['campaigns'])
+        : $defaultState['campaigns'];
+    $locations = isset($state['locations']) && is_array($state['locations'])
+        ? array_values($state['locations'])
+        : $defaultState['locations'];
+
+    $locations = array_map(
+        static function (array $location) use ($campaigns): array {
+            $locationId = isset($location['id']) && is_string($location['id']) ? $location['id'] : null;
+            $explicitIslandId = isset($location['islandId']) && is_string($location['islandId'])
+                ? $location['islandId']
+                : null;
+
+            if ($explicitIslandId !== null || $locationId === null) {
+                $location['islandId'] = $explicitIslandId;
+                return $location;
+            }
+
+            $actionIslandIds = [];
+            $allIslandIds = [];
+
+            foreach ($campaigns as $campaign) {
+                $campaignLocationIds = isset($campaign['locationIds']) && is_array($campaign['locationIds'])
+                    ? $campaign['locationIds']
+                    : [];
+                $campaignIslandId = isset($campaign['islandId']) && is_string($campaign['islandId'])
+                    ? $campaign['islandId']
+                    : null;
+
+                if ($campaignIslandId === null || !in_array($locationId, $campaignLocationIds, true)) {
+                    continue;
+                }
+
+                $allIslandIds[$campaignIslandId] = true;
+
+                if (($campaign['type'] ?? null) === 'accion') {
+                    $actionIslandIds[$campaignIslandId] = true;
+                }
+            }
+
+            if (count($actionIslandIds) === 1) {
+                $location['islandId'] = array_key_first($actionIslandIds);
+                return $location;
+            }
+
+            $location['islandId'] = count($allIslandIds) === 1 ? array_key_first($allIslandIds) : null;
+            return $location;
+        },
+        $locations
+    );
 
     return [
         'users' => isset($state['users']) && is_array($state['users'])
@@ -256,18 +309,14 @@ function normalize_state(array $state): array
         'adminAccessCode' => isset($state['adminAccessCode']) && is_string($state['adminAccessCode'])
             ? $state['adminAccessCode']
             : $defaultState['adminAccessCode'],
-        'locations' => isset($state['locations']) && is_array($state['locations'])
-            ? array_values($state['locations'])
-            : $defaultState['locations'],
+        'locations' => $locations,
         'islands' => isset($state['islands']) && is_array($state['islands'])
             ? array_values($state['islands'])
             : $defaultState['islands'],
         'prizeCategories' => isset($state['prizeCategories']) && is_array($state['prizeCategories'])
             ? array_values($state['prizeCategories'])
             : $defaultState['prizeCategories'],
-        'campaigns' => isset($state['campaigns']) && is_array($state['campaigns'])
-            ? array_values($state['campaigns'])
-            : $defaultState['campaigns'],
+        'campaigns' => $campaigns,
         'sessions' => isset($state['sessions']) && is_array($state['sessions'])
             ? array_values($state['sessions'])
             : [],

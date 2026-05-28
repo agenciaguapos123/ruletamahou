@@ -95,6 +95,20 @@ function getIslandName(islandId: string | null, islands: Island[]): string {
   return islands.find((island) => island.id === islandId)?.name ?? 'Sin isla asignada'
 }
 
+function campaignMatchesIsland(
+  campaign: Campaign,
+  selectedIslandId: string,
+  locations: Location[],
+): boolean {
+  if (campaign.islandId) {
+    return campaign.islandId === selectedIslandId
+  }
+
+  return campaign.locationIds.some(
+    (locationId) => locations.find((location) => location.id === locationId)?.islandId === selectedIslandId,
+  )
+}
+
 function createDraftWindowSet(quota = 10): ScheduleWindow[] {
   return [createScheduleWindow('Franja 1', '18:00', '21:00', quota)]
 }
@@ -591,7 +605,7 @@ function App() {
     return false
   }
 
-  const handleCreateLocation = (name: string, city: string) => {
+  const handleCreateLocation = (name: string, city: string, islandId: string) => {
     setAppState((previousState) => ({
       ...previousState,
       locations: [
@@ -600,16 +614,17 @@ function App() {
           id: createId('location'),
           name,
           city,
+          islandId,
         },
       ],
     }))
   }
 
-  const handleUpdateLocation = (locationId: string, name: string, city: string) => {
+  const handleUpdateLocation = (locationId: string, name: string, city: string, islandId: string) => {
     setAppState((previousState) => ({
       ...previousState,
       locations: previousState.locations.map((location) =>
-        location.id === locationId ? { ...location, name, city } : location,
+        location.id === locationId ? { ...location, name, city, islandId } : location,
       ),
     }))
   }
@@ -685,8 +700,16 @@ function App() {
     setAppState((previousState) => ({
       ...previousState,
       islands: previousState.islands.filter((island) => island.id !== islandId),
+      locations: previousState.locations.map((location) =>
+        location.islandId === islandId ? { ...location, islandId: null } : location,
+      ),
       campaigns: previousState.campaigns.map((campaign) =>
         campaign.islandId === islandId ? { ...campaign, islandId: null } : campaign,
+      ),
+      sessions: previousState.sessions.map((session) =>
+        session.islandId === islandId
+          ? { ...session, islandId: null, islandName: null }
+          : session,
       ),
     }))
   }
@@ -1126,7 +1149,8 @@ function Dashboard({
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const activeCampaigns = campaigns.filter((campaign) => campaign.status === 'active')
   const filteredActiveCampaigns = activeCampaigns.filter(
-    (campaign) => !selectedIslandId || !campaign.islandId || campaign.islandId === selectedIslandId,
+    (campaign) =>
+      !selectedIslandId || campaignMatchesIsland(campaign, selectedIslandId, locations),
   )
   const liveSessions = sessions.filter((session) => session.status === 'live')
 
@@ -1389,8 +1413,8 @@ function AdminPanel({
   onCreateIsland: (name: string) => void
   onUpdateIsland: (islandId: string, name: string) => void
   onDeleteIsland: (islandId: string) => void
-  onCreateLocation: (name: string, city: string) => void
-  onUpdateLocation: (locationId: string, name: string, city: string) => void
+  onCreateLocation: (name: string, city: string, islandId: string) => void
+  onUpdateLocation: (locationId: string, name: string, city: string, islandId: string) => void
   onDeleteLocation: (locationId: string) => void
   onCreatePrizeCategory: (prizeCategory: PrizeCategory) => void
   onUpdatePrizeCategory: (prizeCategory: PrizeCategory) => void
@@ -1405,6 +1429,7 @@ function AdminPanel({
 }) {
   const [locationName, setLocationName] = useState('')
   const [locationCity, setLocationCity] = useState('')
+  const [locationIslandId, setLocationIslandId] = useState('')
   const [editingLocationId, setEditingLocationId] = useState<string | null>(null)
   const [islandName, setIslandName] = useState('')
   const [editingIslandId, setEditingIslandId] = useState<string | null>(null)
@@ -1446,17 +1471,23 @@ function AdminPanel({
   const selectedPrizeCategory =
     prizeCategories.find((prizeCategory) => prizeCategory.id === selectedPrizeCategoryId) ?? null
   const normalizedLocationFilter = locationFilter.trim().toLowerCase()
-  const filteredLocations = locations.filter((location) =>
-    !normalizedLocationFilter
-      ? true
-      : [location.name, location.city].some((value) =>
-          value.toLowerCase().includes(normalizedLocationFilter),
-        ),
-  )
+  const filteredLocations = campaignIslandId
+    ? locations.filter(
+        (location) =>
+          location.islandId === campaignIslandId &&
+          (
+            !normalizedLocationFilter ||
+            [location.name, location.city].some((value) =>
+              value.toLowerCase().includes(normalizedLocationFilter),
+            )
+          ),
+      )
+    : []
 
   const resetLocationForm = () => {
     setLocationName('')
     setLocationCity('')
+    setLocationIslandId('')
     setEditingLocationId(null)
     setLocationMessage(null)
   }
@@ -1517,6 +1548,29 @@ function AdminPanel({
   }, [locations])
 
   useEffect(() => {
+    if (!locationIslandId) {
+      return
+    }
+
+    if (!islands.some((island) => island.id === locationIslandId)) {
+      setLocationIslandId('')
+    }
+  }, [islands, locationIslandId])
+
+  useEffect(() => {
+    if (!campaignIslandId) {
+      return
+    }
+
+    setSelectedLocationIds((previousSelection) =>
+      previousSelection.filter(
+        (locationId) =>
+          locations.find((location) => location.id === locationId)?.islandId === campaignIslandId,
+      ),
+    )
+  }, [campaignIslandId, locations])
+
+  useEffect(() => {
     if (!campaignIslandId) {
       return
     }
@@ -1544,8 +1598,13 @@ function AdminPanel({
     const trimmedName = locationName.trim()
     const trimmedCity = locationCity.trim()
 
-    if (!trimmedName || !trimmedCity) {
-      setLocationMessage('Indica nombre del local y ciudad.')
+    if (
+      !trimmedName ||
+      !trimmedCity ||
+      !locationIslandId ||
+      !islands.some((island) => island.id === locationIslandId)
+    ) {
+      setLocationMessage('Indica nombre del local, ciudad e isla.')
       return
     }
 
@@ -1562,13 +1621,13 @@ function AdminPanel({
     }
 
     if (editingLocationId) {
-      onUpdateLocation(editingLocationId, trimmedName, trimmedCity)
+      onUpdateLocation(editingLocationId, trimmedName, trimmedCity, locationIslandId)
       resetLocationForm()
       setLocationMessage('Local actualizado correctamente.')
       return
     }
 
-    onCreateLocation(trimmedName, trimmedCity)
+    onCreateLocation(trimmedName, trimmedCity, locationIslandId)
     resetLocationForm()
     setLocationMessage('Local creado correctamente.')
   }
@@ -1576,6 +1635,7 @@ function AdminPanel({
   const handleEditLocationClick = (location: Location) => {
     setLocationName(location.name)
     setLocationCity(location.city)
+    setLocationIslandId(location.islandId ?? '')
     setEditingLocationId(location.id)
     setLocationMessage(null)
   }
@@ -1861,6 +1921,15 @@ function AdminPanel({
       return
     }
 
+    if (
+      selectedLocationIds.some(
+        (locationId) => locations.find((location) => location.id === locationId)?.islandId !== campaignIslandId,
+      )
+    ) {
+      setCampaignMessage('Todos los locales deben pertenecer a la isla seleccionada.')
+      return
+    }
+
     if (campaignType === 'accion' && selectedLocationIds.length !== 1) {
       setCampaignMessage('Una accion debe asociarse a un solo local.')
       return
@@ -2050,6 +2119,21 @@ function AdminPanel({
                 placeholder="Ejemplo: Madrid"
               />
             </label>
+
+            <label className="field-group">
+              <span>Isla asignada</span>
+              <select
+                value={locationIslandId}
+                onChange={(event) => setLocationIslandId(event.target.value)}
+              >
+                <option value="">Selecciona una isla</option>
+                {islands.map((island) => (
+                  <option key={island.id} value={island.id}>
+                    {island.name}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
 
           {locationMessage ? <p className="form-message">{locationMessage}</p> : null}
@@ -2072,6 +2156,7 @@ function AdminPanel({
             <article className="mini-panel" key={location.id}>
               <strong>{location.name}</strong>
               <span>{location.city}</span>
+              <span>{getIslandName(location.islandId, islands)}</span>
               <div className="card-action-row">
                 <button
                   className="ghost-button"
@@ -2335,6 +2420,10 @@ function AdminPanel({
               />
             </label>
 
+            {campaignIslandId ? null : (
+              <div className="always-on-box">Selecciona primero la isla para cribar los locales disponibles.</div>
+            )}
+
             <div className="selector-grid">
               {filteredLocations.map((location) => {
                 const isSelected = selectedLocationIds.includes(location.id)
@@ -2347,6 +2436,7 @@ function AdminPanel({
                     <div className="selector-card-body">
                       <strong>{location.name}</strong>
                       <span>{location.city}</span>
+                      <span>{getIslandName(location.islandId, islands)}</span>
                     </div>
                     <button
                       className={isSelected ? 'secondary-button selector-select-button' : 'ghost-button selector-select-button'}
@@ -2367,7 +2457,11 @@ function AdminPanel({
             </div>
 
             {filteredLocations.length ? null : (
-              <div className="empty-state">No hay locales que coincidan con el filtro actual.</div>
+              <div className="empty-state">
+                {campaignIslandId
+                  ? 'No hay locales asignados a esa isla con el filtro actual.'
+                  : 'Selecciona una isla para ver los locales disponibles.'}
+              </div>
             )}
           </div>
 

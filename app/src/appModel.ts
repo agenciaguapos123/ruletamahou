@@ -15,6 +15,7 @@ export interface Location {
   id: string
   name: string
   city: string
+  islandId: string | null
 }
 
 export interface Island {
@@ -258,11 +259,65 @@ function normalizeActivationSession(session: ActivationSession): ActivationSessi
   }
 }
 
-function seedLocations(): Location[] {
+function inferLocationIslandId(
+  location: Partial<Location>,
+  campaigns: Campaign[],
+): string | null {
+  if (typeof location.islandId === 'string') {
+    return location.islandId
+  }
+
+  if (typeof location.id !== 'string') {
+    return null
+  }
+
+  const actionIslandIds = new Set(
+    campaigns
+      .filter(
+        (campaign) =>
+          campaign.type === 'accion' &&
+          campaign.locationIds.includes(location.id as string) &&
+          typeof campaign.islandId === 'string',
+      )
+      .map((campaign) => campaign.islandId as string),
+  )
+
+  if (actionIslandIds.size === 1) {
+    return Array.from(actionIslandIds)[0]
+  }
+
+  const islandIds = new Set(
+    campaigns
+      .filter(
+        (campaign) =>
+          campaign.locationIds.includes(location.id as string) && typeof campaign.islandId === 'string',
+      )
+      .map((campaign) => campaign.islandId as string),
+  )
+
+  return islandIds.size === 1 ? Array.from(islandIds)[0] : null
+}
+
+function normalizeLocation(location: Location, campaigns: Campaign[]): Location {
+  return {
+    ...location,
+    islandId: inferLocationIslandId(location, campaigns),
+  }
+}
+
+function seedLocations(islands: Island[]): Location[] {
+  const primaryIslandId = islands[0]?.id ?? null
+  const secondaryIslandId = islands[1]?.id ?? primaryIslandId
+
   return [
-    { id: createId('location'), name: 'Mercado de San Ildefonso', city: 'Madrid' },
-    { id: createId('location'), name: 'La Tape', city: 'Madrid' },
-    { id: createId('location'), name: 'Sala Mon', city: 'Madrid' },
+    {
+      id: createId('location'),
+      name: 'Mercado de San Ildefonso',
+      city: 'Madrid',
+      islandId: primaryIslandId,
+    },
+    { id: createId('location'), name: 'La Tape', city: 'Madrid', islandId: secondaryIslandId },
+    { id: createId('location'), name: 'Sala Mon', city: 'Madrid', islandId: secondaryIslandId },
   ]
 }
 
@@ -391,7 +446,7 @@ function seedCampaigns(
       type: 'ruta',
       notes: 'Ruta multi local para mover publico entre varios puntos de consumo.',
       islandId: secondaryIslandId,
-      locationIds: [locationIds[1], locationIds[2], locationIds[0]],
+      locationIds: [locationIds[1], locationIds[2]],
       status: 'active',
       prizeTemplates: [
         buildPrizeTemplateFromCategory(openerCategory, 40),
@@ -405,8 +460,8 @@ function seedCampaigns(
 }
 
 export function createDefaultState(): AppState {
-  const locations = seedLocations()
   const islands = seedIslands()
+  const locations = seedLocations(islands)
   const prizeCategories = seedPrizeCategories()
 
   return {
@@ -464,7 +519,9 @@ function normalizeStoredAppState(parsedState: Partial<AppState>): AppState {
         ? parsedState.adminAccessCode
         : defaultState.adminAccessCode,
     locations: Array.isArray(parsedState.locations)
-      ? parsedState.locations
+      ? parsedState.locations.map((location) =>
+          normalizeLocation(location as Location, campaigns),
+        )
       : defaultState.locations,
     islands: Array.isArray(parsedState.islands)
       ? parsedState.islands
