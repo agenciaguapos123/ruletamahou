@@ -3193,25 +3193,6 @@ function ActivationScreen({
 
             <p className="wheel-legal">Mahou recomienda el consumo responsable. 5,5º</p>
           </div>
-
-          <div className="activation-side">
-            <div className="panel-copy">
-              <strong>Premios posibles</strong>
-            </div>
-
-            <div className="possible-prize-list">
-              {livePrizes.length ? (
-                livePrizes.map((prize) => (
-                  <article className="possible-prize-card" key={prize.templateId}>
-                    {prize.imageSrc ? (
-                      <img className="possible-prize-thumb" src={prize.imageSrc} alt={prize.name} />
-                    ) : null}
-                    <strong>{prize.name}</strong>
-                  </article>
-                ))
-              ) : null}
-            </div>
-          </div>
         </div>
       </section>
 
