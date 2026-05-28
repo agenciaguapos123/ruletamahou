@@ -336,8 +336,6 @@
 }
 
 .status-chip,
-.campaign-pill,
-.tag,
 .chip-button,
 .nav-link,
 .nav-link-button {
@@ -539,6 +537,14 @@
   justify-content: center;
   align-items: center;
   text-align: center;
+}
+
+.panel-header-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
 }
 
 .screen-grid-admin .stack-form {
@@ -929,8 +935,7 @@
   background: rgba(255, 248, 244, 0.06);
 }
 
-.prize-thumb,
-.splash-prize-image {
+.prize-thumb {
   display: block;
   object-fit: cover;
   border-radius: 18px;
@@ -1120,8 +1125,11 @@
 }
 
 .splash-prize-image {
-  width: min(100%, 360px);
-  max-height: 280px;
+  display: block;
+  width: auto;
+  max-width: min(100%, 460px);
+  max-height: min(52vh, 420px);
+  object-fit: contain;
 }
 
 .result-splash-card .section-title {

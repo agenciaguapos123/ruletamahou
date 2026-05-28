@@ -121,6 +121,8 @@ type FullscreenElement = HTMLElement & {
   msRequestFullscreen?: () => Promise<void> | void
 }
 
+type AdminPanelView = 'settings' | 'routes'
+
 function getFullscreenElement(): Element | null {
   if (typeof document === 'undefined') {
     return null
@@ -736,11 +738,39 @@ function App() {
 
   const handleOpenCampaignBuilder = () => {
     setCampaignBuilderOpen(true)
-    navigate('/admin')
+    navigate('/admin/routes')
   }
 
   const handleCloseCampaignBuilder = () => {
     setCampaignBuilderOpen(false)
+  }
+
+  const isAdminSettingsView = location.pathname === '/admin' || location.pathname === '/admin/config'
+  const isAdminRoutesView = location.pathname === '/admin/routes'
+  const adminPanelProps = {
+    currentUser: currentUser as AppUser,
+    islands: appState.islands,
+    locations: appState.locations,
+    prizeCategories: appState.prizeCategories,
+    campaigns: appState.campaigns,
+    sessions: appState.sessions,
+    isCampaignBuilderOpen: campaignBuilderOpen,
+    onOpenCampaignBuilder: handleOpenCampaignBuilder,
+    onCloseCampaignBuilder: handleCloseCampaignBuilder,
+    onCreateIsland: handleCreateIsland,
+    onUpdateIsland: handleUpdateIsland,
+    onDeleteIsland: handleDeleteIsland,
+    onCreateLocation: handleCreateLocation,
+    onUpdateLocation: handleUpdateLocation,
+    onDeleteLocation: handleDeleteLocation,
+    onCreatePrizeCategory: handleCreatePrizeCategory,
+    onUpdatePrizeCategory: handleUpdatePrizeCategory,
+    onDeletePrizeCategory: handleDeletePrizeCategory,
+    onCreateCampaign: handleCreateCampaign,
+    onUpdateCampaign: handleUpdateCampaign,
+    onUpdateCampaignStatus: handleUpdateCampaignStatus,
+    onDeleteCampaign: handleDeleteCampaign,
+    onUpdateAdminAccessCode: handleUpdateAdminAccessCode,
   }
 
   if (!currentUser) {
@@ -772,14 +802,17 @@ function App() {
           {canAccessAdmin ? (
             <button
               className={
-                location.pathname === '/admin' && campaignBuilderOpen
+                isAdminRoutesView
                   ? 'menu-link menu-link-active'
                   : 'menu-link'
               }
               type="button"
-              onClick={handleOpenCampaignBuilder}
+              onClick={() => {
+                handleCloseCampaignBuilder()
+                navigate('/admin/routes')
+              }}
             >
-              Crear accion/ruta
+              Rutas
             </button>
           ) : null}
           <button
@@ -790,13 +823,17 @@ function App() {
             Salir
           </button>
           <button
-            className={location.pathname === '/admin' ? 'menu-link menu-link-active menu-link-settings' : 'menu-link menu-link-settings'}
+            className={
+              isAdminSettingsView
+                ? 'menu-link menu-link-active menu-link-settings'
+                : 'menu-link menu-link-settings'
+            }
             type="button"
             aria-label="Configuracion"
             title="Configuracion"
             onClick={() => {
               handleCloseCampaignBuilder()
-              navigate('/admin')
+              navigate('/admin/config')
             }}
           >
             <img className="settings-icon" src={assetPath('icons/settings.png')} alt="" />
@@ -831,36 +868,32 @@ function App() {
             />
           }
         />
+        <Route path="/admin" element={<Navigate to="/admin/config" replace />} />
         <Route
-          path="/admin"
+          path="/admin/config"
           element={
             canAccessAdmin ? (
               <AdminPanel
-                currentUser={currentUser}
-                islands={appState.islands}
-                locations={appState.locations}
-                prizeCategories={appState.prizeCategories}
-                campaigns={appState.campaigns}
-                sessions={appState.sessions}
-                isCampaignBuilderOpen={campaignBuilderOpen}
-                onCloseCampaignBuilder={handleCloseCampaignBuilder}
-                onCreateIsland={handleCreateIsland}
-                onUpdateIsland={handleUpdateIsland}
-                onDeleteIsland={handleDeleteIsland}
-                onCreateLocation={handleCreateLocation}
-                onUpdateLocation={handleUpdateLocation}
-                onDeleteLocation={handleDeleteLocation}
-                onCreatePrizeCategory={handleCreatePrizeCategory}
-                onUpdatePrizeCategory={handleUpdatePrizeCategory}
-                onDeletePrizeCategory={handleDeletePrizeCategory}
-                onCreateCampaign={handleCreateCampaign}
-                onUpdateCampaign={handleUpdateCampaign}
-                onUpdateCampaignStatus={handleUpdateCampaignStatus}
-                                onDeleteCampaign={handleDeleteCampaign}
-                onUpdateAdminAccessCode={handleUpdateAdminAccessCode}
+                key="settings"
+                view="settings"
+                {...adminPanelProps}
               />
             ) : (
-              <AdminGate onUnlock={handleUnlockAdmin} />
+              <AdminGate onUnlock={handleUnlockAdmin} redirectPath="/admin/config" />
+            )
+          }
+        />
+        <Route
+          path="/admin/routes"
+          element={
+            canAccessAdmin ? (
+              <AdminPanel
+                key="routes"
+                view="routes"
+                {...adminPanelProps}
+              />
+            ) : (
+              <AdminGate onUnlock={handleUnlockAdmin} redirectPath="/admin/routes" />
             )
           }
         />
@@ -1138,7 +1171,13 @@ function Dashboard({
   )
 }
 
-function AdminGate({ onUnlock }: { onUnlock: (code: string) => boolean }) {
+function AdminGate({
+  onUnlock,
+  redirectPath = '/admin/config',
+}: {
+  onUnlock: (code: string) => boolean
+  redirectPath?: string
+}) {
   const navigate = useNavigate()
   const [code, setCode] = useState('')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -1152,7 +1191,7 @@ function AdminGate({ onUnlock }: { onUnlock: (code: string) => boolean }) {
     }
 
     setErrorMessage(null)
-    navigate('/admin')
+    navigate(redirectPath)
   }
 
   return (
@@ -1188,6 +1227,7 @@ function AdminGate({ onUnlock }: { onUnlock: (code: string) => boolean }) {
 }
 
 function AdminPanel({
+  view,
   currentUser,
   islands,
   locations,
@@ -1195,6 +1235,7 @@ function AdminPanel({
   campaigns,
   sessions,
   isCampaignBuilderOpen,
+  onOpenCampaignBuilder,
   onCloseCampaignBuilder,
   onCreateIsland,
   onUpdateIsland,
@@ -1211,6 +1252,7 @@ function AdminPanel({
   onDeleteCampaign,
   onUpdateAdminAccessCode,
 }: {
+  view: AdminPanelView
   currentUser: AppUser
   islands: Island[]
   locations: Location[]
@@ -1218,6 +1260,7 @@ function AdminPanel({
   campaigns: Campaign[]
   sessions: ActivationSession[]
   isCampaignBuilderOpen: boolean
+  onOpenCampaignBuilder: () => void
   onCloseCampaignBuilder: () => void
   onCreateIsland: (name: string) => void
   onUpdateIsland: (islandId: string, name: string) => void
@@ -1263,6 +1306,8 @@ function AdminPanel({
   const [accessCodeCurrent, setAccessCodeCurrent] = useState('')
   const [accessCodeNext, setAccessCodeNext] = useState('')
   const [accessCodeMessage, setAccessCodeMessage] = useState<string | null>(null)
+  const isSettingsView = view === 'settings'
+  const isRoutesView = view === 'routes'
   const manageableCampaigns = campaigns
   const loggedSessions = [...sessions]
     .filter((session) => session.status === 'completed' || getSessionSpinLogs(session).length > 0)
@@ -1814,13 +1859,19 @@ function AdminPanel({
 
   return (
     <main className="screen-grid screen-grid-admin">
+      {isRoutesView ? (
       <section className="panel panel-wide">
         <div className="panel-header">
           <div>
             <p className="eyebrow">Configuracion general</p>
             <h2 className="section-title">Locales y estructura base</h2>
           </div>
-          <span className="status-chip accent">{currentUser.role === 'admin' ? 'Admin' : 'Desbloqueado'}</span>
+          <div className="panel-header-controls">
+            <span className="status-chip accent">{currentUser.role === 'admin' ? 'Admin' : 'Desbloqueado'}</span>
+            <button className="secondary-button" type="button" onClick={onOpenCampaignBuilder}>
+              Crear accion o ruta
+            </button>
+          </div>
         </div>
 
         <form className="stack-form" onSubmit={handleCreateLocationSubmit}>
@@ -2026,8 +2077,9 @@ function AdminPanel({
           )}
         </div>
       </section>
+      ) : null}
 
-      {isCampaignBuilderOpen || editingCampaignId ? (
+      {isRoutesView && (isCampaignBuilderOpen || editingCampaignId) ? (
         <>
           {editingCampaignId ? (
             <div className="campaign-detail-modal" onClick={handleCancelCampaignEdit} />
@@ -2321,6 +2373,7 @@ function AdminPanel({
         </>
       ) : null}
 
+      {isSettingsView ? (
       <section className="panel panel-wide">
         <div className="panel-header">
           <div>
@@ -2357,11 +2410,13 @@ function AdminPanel({
           </button>
         </form>
       </section>
+      ) : null}
 
+      {isRoutesView ? (
       <section className="panel panel-wide">
         <div className="panel-header">
           <div>
-            <p className="eyebrow">Base creada</p>
+            <p className="eyebrow">Operativas</p>
             <h2 className="section-title">Acciones y rutas configuradas</h2>
           </div>
         </div>
@@ -2451,7 +2506,9 @@ function AdminPanel({
           )}
         </div>
       </section>
+      ) : null}
 
+      {isSettingsView ? (
       <section className="panel panel-wide">
         <div className="panel-header">
           <div>
@@ -2519,6 +2576,7 @@ function AdminPanel({
           <div className="empty-state">Todavia no hay resultados registrados de activaciones.</div>
         )}
       </section>
+      ) : null}
     </main>
   )
 }
