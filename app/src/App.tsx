@@ -3140,15 +3140,12 @@ function ActivationScreen({
             <p className="eyebrow">Pantalla de ruleta</p>
             <h2 className="section-title">{session.campaignName}</h2>
             <p className="panel-copy">
-              {[formatLocationList(session.locationIds, locations), session.islandName, session.promoterNames.join(', ')]
+              {[formatLocationList(session.locationIds, locations), session.islandName]
                 .filter(Boolean)
                 .join(' · ')}
             </p>
           </div>
           <div className="activation-toolbar-actions">
-            <span className="campaign-pill">
-              {session.campaignType === 'accion' ? 'Accion' : 'Ruta'}
-            </span>
             <button className="ghost-button" type="button" onClick={() => navigate('/')}>
               Volver al menu
             </button>
