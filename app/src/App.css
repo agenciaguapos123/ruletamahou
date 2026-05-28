@@ -1191,6 +1191,10 @@
   flex: 1 1 140px;
 }
 
+.window-carry-toggle {
+  min-width: 172px;
+}
+
 .info-grid .mini-panel,
 .location-list .mini-panel,
 .credential-grid .mini-panel {

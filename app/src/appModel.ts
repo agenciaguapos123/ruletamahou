@@ -37,6 +37,7 @@ export interface ScheduleWindow {
   end: string
   enabled: boolean
   quota: number
+  carryOver: boolean
 }
 
 export interface PrizeTemplate {
@@ -126,6 +127,7 @@ export function createScheduleWindow(
   start = '18:00',
   end = '21:00',
   quota = 1,
+  carryOver = false,
 ): ScheduleWindow {
   return {
     id: createId('window'),
@@ -134,6 +136,7 @@ export function createScheduleWindow(
     end,
     enabled: true,
     quota: Math.max(Math.floor(quota), 0),
+    carryOver,
   }
 }
 
@@ -142,6 +145,7 @@ function cloneWindows(windows: ScheduleWindow[]): ScheduleWindow[] {
     ...windowSlot,
     id: createId('window'),
     quota: Math.max(Math.floor(windowSlot.quota ?? 0), 0),
+    carryOver: typeof windowSlot.carryOver === 'boolean' ? windowSlot.carryOver : true,
   }))
 }
 
@@ -152,6 +156,7 @@ function normalizeScheduleWindow(windowSlot: ScheduleWindow, fallbackQuota: numb
       typeof windowSlot.quota === 'number' && Number.isFinite(windowSlot.quota)
         ? Math.max(Math.floor(windowSlot.quota), 0)
         : Math.max(Math.floor(fallbackQuota), 0),
+    carryOver: typeof windowSlot.carryOver === 'boolean' ? windowSlot.carryOver : true,
   }
 }
 
@@ -436,7 +441,7 @@ function seedCampaigns(
         buildPrizeTemplateFromCategory(tshirtCategory, 20),
         buildPrizeTemplateFromCategory(drinkCategory, 16, {
           timeMode: 'scheduled',
-          windows: [createScheduleWindow('Afterwork', '19:00', '22:00', 16)],
+          windows: [createScheduleWindow('Afterwork', '19:00', '22:00', 16, true)],
         }),
       ],
     },
@@ -452,7 +457,7 @@ function seedCampaigns(
         buildPrizeTemplateFromCategory(openerCategory, 40),
         buildPrizeTemplateFromCategory(ticketCategory, 10, {
           timeMode: 'scheduled',
-          windows: [createScheduleWindow('Cierre', '21:30', '23:30', 10)],
+          windows: [createScheduleWindow('Cierre', '21:30', '23:30', 10, true)],
         }),
       ],
     },
@@ -694,8 +699,42 @@ function getOrderedEnabledWindows(windows: ScheduleWindow[]): ScheduleWindow[] {
   return windows.filter((windowSlot) => windowSlot.enabled).sort(compareWindowOrder)
 }
 
-function countPrizeAwards(session: ActivationSession, templateId: string): number {
-  return session.spinLogs.filter((spinLog) => spinLog.prizeTemplateId === templateId).length
+function getCarryChainStartIndex(windows: ScheduleWindow[], activeWindowIndex: number): number {
+  for (let index = activeWindowIndex - 1; index >= 0; index -= 1) {
+    if (!windows[index].carryOver) {
+      return index + 1
+    }
+  }
+
+  return 0
+}
+
+function getWindowIndexForDate(windows: ScheduleWindow[], awardedAt: Date): number {
+  return getCurrentActiveWindowIndex(windows, awardedAt)
+}
+
+function countScheduledPrizeAwards(
+  session: ActivationSession,
+  templateId: string,
+  windows: ScheduleWindow[],
+  startWindowIndex: number,
+  endWindowIndex: number,
+): number {
+  return session.spinLogs.filter((spinLog) => {
+    if (spinLog.prizeTemplateId !== templateId) {
+      return false
+    }
+
+    const awardedAt = new Date(spinLog.awardedAt)
+
+    if (Number.isNaN(awardedAt.getTime())) {
+      return false
+    }
+
+    const windowIndex = getWindowIndexForDate(windows, awardedAt)
+
+    return windowIndex >= startWindowIndex && windowIndex <= endWindowIndex
+  }).length
 }
 
 function getCurrentActiveWindowIndex(windows: ScheduleWindow[], now: Date): number {
@@ -726,10 +765,17 @@ export function getPrizeAvailableCount(
     return 0
   }
 
+  const carryChainStartIndex = getCarryChainStartIndex(orderedWindows, activeWindowIndex)
   const releasedQuota = orderedWindows
-    .slice(0, activeWindowIndex + 1)
+    .slice(carryChainStartIndex, activeWindowIndex + 1)
     .reduce((sum, windowSlot) => sum + Math.max(windowSlot.quota, 0), 0)
-  const awardedCount = countPrizeAwards(session, prize.templateId)
+  const awardedCount = countScheduledPrizeAwards(
+    session,
+    prize.templateId,
+    orderedWindows,
+    carryChainStartIndex,
+    activeWindowIndex,
+  )
 
   return Math.max(0, Math.min(prize.remainingStock, releasedQuota - awardedCount))
 }

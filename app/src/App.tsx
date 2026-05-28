@@ -2547,8 +2547,8 @@ function AdminPanel({
               {campaignType === 'ruta' ? (
                 <div className="always-on-box route-pool-note">
                   La ruta usa un pool de regalos propio e independiente de las ubicaciones.
-                  Las franjas horarias liberan cupos sobre el stock total de la ruta y el sobrante
-                  pasa a la siguiente franja activa.
+                  Cada franja libera su propio cupo y solo arrastra el sobrante a la siguiente
+                  si activas "Arrastrar sobrante".
                 </div>
               ) : null}
 
@@ -2761,8 +2761,8 @@ function AdminPanel({
               <p>{campaign.notes || 'Sin notas operativas.'}</p>
                             {campaign.type === 'ruta' ? (
                               <div className="always-on-box route-pool-note">
-                                Pool de regalos independiente de la ruta. Las franjas liberan cupos acumulables
-                                sobre el stock total.
+                                Pool de regalos independiente de la ruta. Las franjas solo acumulan sobrante
+                                cuando activas "Arrastrar sobrante" en la propia franja.
                               </div>
                             ) : null}
               <div className="tag-row tag-row-list">
@@ -3284,6 +3284,15 @@ function WindowEditor({
                 type="checkbox"
                 checked={windowSlot.enabled}
                 onChange={(event) => updateWindow(windowSlot.id, { enabled: event.target.checked })}
+              />
+            </label>
+
+            <label className="field-group field-toggle compact-toggle window-carry-toggle">
+              <span>Arrastrar sobrante</span>
+              <input
+                type="checkbox"
+                checked={windowSlot.carryOver}
+                onChange={(event) => updateWindow(windowSlot.id, { carryOver: event.target.checked })}
               />
             </label>
 
