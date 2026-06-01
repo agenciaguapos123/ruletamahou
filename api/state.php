@@ -40,7 +40,7 @@ function summarize_recovered_state(array $state): array
     ];
 }
 
-function inspect_quarantined_state_copy(string $candidatePath): array
+function inspect_quarantined_state_copy(string $candidatePath, bool $includeRaw = false): array
 {
     $inspectMethod = static function (callable $resolver): array {
         try {
@@ -56,7 +56,7 @@ function inspect_quarantined_state_copy(string $candidatePath): array
         }
     };
 
-    return [
+    $inspection = [
         'file' => basename($candidatePath),
         'size' => is_file($candidatePath) ? filesize($candidatePath) : null,
         'direct' => $inspectMethod(static function () use ($candidatePath): array {
@@ -68,10 +68,15 @@ function inspect_quarantined_state_copy(string $candidatePath): array
                 return recover_state_with_sqlite_cli($candidatePath);
             }),
         ],
-        'raw' => $inspectMethod(static function () use ($candidatePath): array {
-            return recover_state_from_raw_database_file($candidatePath);
-        }),
     ];
+
+    if ($includeRaw) {
+        $inspection['raw'] = $inspectMethod(static function () use ($candidatePath): array {
+            return recover_state_from_raw_database_file($candidatePath);
+        });
+    }
+
+    return $inspection;
 }
 
 try {
@@ -104,9 +109,11 @@ try {
             }
 
             if ($action === 'inspectQuarantined') {
+                $includeRaw = isset($payload['includeRaw']) && $payload['includeRaw'] === true;
+
                 json_response([
-                    'candidates' => array_map(static function (string $candidatePath): array {
-                        return inspect_quarantined_state_copy($candidatePath);
+                    'candidates' => array_map(static function (string $candidatePath) use ($includeRaw): array {
+                        return inspect_quarantined_state_copy($candidatePath, $includeRaw);
                     }, $candidates),
                 ]);
             }
