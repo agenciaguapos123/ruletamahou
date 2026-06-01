@@ -3,6 +3,9 @@ declare(strict_types=1);
 
 require __DIR__ . '/lib.php';
 
+@ini_set('memory_limit', '512M');
+@set_time_limit(120);
+
 function list_quarantined_database_groups(string $databasePath): array
 {
     $directory = dirname($databasePath);
@@ -236,6 +239,14 @@ function restore_quarantined_group(array $group, string $databasePath): array
         if ($recoveredState === null) {
             try {
                 $recoveredState = recover_state_with_sqlite_binary($workingDatabasePath, $workingDirectory);
+            } catch (Throwable $exception) {
+                $recoveredState = null;
+            }
+        }
+
+        if ($recoveredState === null) {
+            try {
+                $recoveredState = recover_state_from_raw_database_file($workingDatabasePath);
             } catch (Throwable $exception) {
                 $recoveredState = null;
             }

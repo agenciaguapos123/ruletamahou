@@ -21,6 +21,9 @@ try {
                 json_response(['message' => 'Solo el administrador puede restaurar copias antiguas.'], 403);
             }
 
+            @ini_set('memory_limit', '512M');
+            @set_time_limit(120);
+
             $databasePath = get_database_path();
             $candidates = list_quarantined_database_paths($databasePath);
 
