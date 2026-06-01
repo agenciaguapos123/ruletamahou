@@ -249,6 +249,15 @@ function build_default_state(): array
     ];
 }
 
+function first_array_key(array $values): ?string
+{
+    foreach ($values as $key => $_value) {
+        return is_string($key) ? $key : (string)$key;
+    }
+
+    return null;
+}
+
 function normalize_state(array $state): array
 {
     $defaultState = build_default_state();
@@ -294,11 +303,11 @@ function normalize_state(array $state): array
             }
 
             if (count($actionIslandIds) === 1) {
-                $location['islandId'] = array_key_first($actionIslandIds);
+                $location['islandId'] = first_array_key($actionIslandIds);
                 return $location;
             }
 
-            $location['islandId'] = count($allIslandIds) === 1 ? array_key_first($allIslandIds) : null;
+            $location['islandId'] = count($allIslandIds) === 1 ? first_array_key($allIslandIds) : null;
             return $location;
         },
         $locations
