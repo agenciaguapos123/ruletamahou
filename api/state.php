@@ -15,6 +15,55 @@ try {
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $payload = read_json_input();
+
+        if (isset($payload['action']) && $payload['action'] === 'restoreQuarantined') {
+            if (($user['role'] ?? '') !== 'admin') {
+                json_response(['message' => 'Solo el administrador puede restaurar copias antiguas.'], 403);
+            }
+
+            $databasePath = get_database_path();
+            $candidates = list_quarantined_database_paths($databasePath);
+
+            if (!$candidates) {
+                json_response(['message' => 'No se encontraron copias antiguas para restaurar.'], 404);
+            }
+
+            $recoveredState = null;
+            $recoveredSource = null;
+            $errors = [];
+
+            foreach ($candidates as $candidatePath) {
+                try {
+                    $recoveredState = recover_state_from_quarantined_database($candidatePath);
+                    $recoveredSource = basename($candidatePath);
+                    break;
+                } catch (Throwable $exception) {
+                    $errors[] = [
+                        'file' => basename($candidatePath),
+                        'message' => $exception->getMessage(),
+                    ];
+                }
+            }
+
+            if ($recoveredState === null || $recoveredSource === null) {
+                json_response([
+                    'message' => 'No se pudo recuperar ninguna copia antigua de la ruleta.',
+                    'errors' => $errors,
+                ], 500);
+            }
+
+            archive_database_artifacts($databasePath, 'pre-restore');
+            $restorePdo = open_database();
+            save_state($restorePdo, $recoveredState);
+
+            json_response([
+                'state' => $recoveredState,
+                'restored' => true,
+                'source' => $recoveredSource,
+                'errors' => $errors,
+            ]);
+        }
+
         $incomingState = $payload;
 
         if (isset($payload['state']) && is_array($payload['state'])) {
