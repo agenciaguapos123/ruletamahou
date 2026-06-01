@@ -105,6 +105,190 @@ function quarantine_malformed_database(string $databasePath): void
     }
 }
 
+function archive_database_artifact(string $artifactPath, string $label, string $timestamp): void
+{
+    if (!file_exists($artifactPath)) {
+        return;
+    }
+
+    $backupPath = $artifactPath . '.' . $label . '-' . $timestamp;
+    $attempt = 1;
+
+    while (file_exists($backupPath)) {
+        $backupPath = $artifactPath . '.' . $label . '-' . $timestamp . '-' . $attempt;
+        $attempt += 1;
+    }
+
+    if (!rename($artifactPath, $backupPath)) {
+        throw new RuntimeException('No se pudo archivar la base de datos activa.');
+    }
+}
+
+function archive_database_artifacts(string $databasePath, string $label): void
+{
+    $timestamp = gmdate('Ymd-His');
+
+    foreach ([$databasePath, $databasePath . '-wal', $databasePath . '-shm', $databasePath . '-journal'] as $artifactPath) {
+        archive_database_artifact($artifactPath, $label, $timestamp);
+    }
+}
+
+function list_quarantined_database_paths(string $databasePath): array
+{
+    $matches = glob($databasePath . '.corrupt-*');
+
+    if (!is_array($matches)) {
+        return [];
+    }
+
+    $files = array_values(array_filter($matches, 'is_file'));
+
+    usort(
+        $files,
+        static function (string $left, string $right): int {
+            $leftModifiedAt = filemtime($left) ?: 0;
+            $rightModifiedAt = filemtime($right) ?: 0;
+
+            if ($leftModifiedAt === $rightModifiedAt) {
+                return strcmp($right, $left);
+            }
+
+            return $rightModifiedAt <=> $leftModifiedAt;
+        }
+    );
+
+    return $files;
+}
+
+function decode_state_payload(string $encodedState): array
+{
+    $decoded = json_decode($encodedState, true);
+
+    if (!is_array($decoded)) {
+        throw new RuntimeException('La copia recuperada no contiene un estado valido.');
+    }
+
+    return normalize_state($decoded);
+}
+
+function load_state_from_database_file(string $databasePath): array
+{
+    $pdo = new PDO('sqlite:' . $databasePath);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+
+    $statement = $pdo->query('SELECT state_json FROM app_state WHERE id = 1 LIMIT 1');
+    $row = $statement !== false ? $statement->fetch() : false;
+
+    if (!is_array($row) || !isset($row['state_json'])) {
+        throw new RuntimeException('La copia antigua no contiene estado guardado.');
+    }
+
+    return decode_state_payload((string)$row['state_json']);
+}
+
+function split_sql_value_list(string $valuesSql): array
+{
+    $parts = preg_split("/,(?=(?:[^']*'[^']*')*[^']*$)/", $valuesSql);
+
+    return is_array($parts) ? array_map('trim', $parts) : [];
+}
+
+function unquote_sqlite_value(string $value): string
+{
+    $trimmedValue = trim($value);
+
+    if (strlen($trimmedValue) >= 2 && $trimmedValue[0] === "'" && substr($trimmedValue, -1) === "'") {
+        $trimmedValue = substr($trimmedValue, 1, -1);
+    }
+
+    return str_replace("''", "'", $trimmedValue);
+}
+
+function recover_state_from_sqlite_dump(string $dump): array
+{
+    if (
+        preg_match('/INSERT INTO\s+app_state(?:\(([^)]*)\))?\s+VALUES\s*\((.+?)\);/s', $dump, $matches) !== 1
+    ) {
+        throw new RuntimeException('sqlite3 no encontro una fila valida en app_state.');
+    }
+
+    $columnNames = isset($matches[1]) && trim($matches[1]) !== ''
+        ? array_map('trim', explode(',', $matches[1]))
+        : [];
+    $values = split_sql_value_list($matches[2]);
+    $stateJsonIndex = 1;
+
+    if ($columnNames) {
+        $stateJsonIndex = array_search('state_json', $columnNames, true);
+
+        if ($stateJsonIndex === false) {
+            throw new RuntimeException('sqlite3 recupero la fila pero no encontro state_json.');
+        }
+    }
+
+    if (!isset($values[$stateJsonIndex])) {
+        throw new RuntimeException('sqlite3 recupero la fila con columnas incompletas.');
+    }
+
+    return decode_state_payload(unquote_sqlite_value($values[$stateJsonIndex]));
+}
+
+function find_sqlite_cli_binary(): ?string
+{
+    if (!function_exists('shell_exec')) {
+        return null;
+    }
+
+    $output = shell_exec('command -v sqlite3 2>/dev/null || which sqlite3 2>/dev/null');
+
+    if (!is_string($output) || trim($output) === '') {
+        return null;
+    }
+
+    $lines = preg_split('/\r?\n/', trim($output));
+
+    return is_array($lines) && isset($lines[0]) && trim($lines[0]) !== '' ? trim($lines[0]) : null;
+}
+
+function recover_state_with_sqlite_cli(string $databasePath): array
+{
+    $sqliteBinary = find_sqlite_cli_binary();
+
+    if ($sqliteBinary === null) {
+        throw new RuntimeException('sqlite3 no esta disponible en el servidor para recuperar la copia dañada.');
+    }
+
+    $sqliteBinaryCommand = escapeshellcmd($sqliteBinary);
+    $readCommand = $sqliteBinaryCommand . ' ' . escapeshellarg($databasePath) . ' "SELECT state_json FROM app_state WHERE id = 1 LIMIT 1;" 2>/dev/null';
+    $readOutput = shell_exec($readCommand);
+
+    if (is_string($readOutput) && trim($readOutput) !== '') {
+        try {
+            return decode_state_payload(trim($readOutput));
+        } catch (Throwable $exception) {
+        }
+    }
+
+    $recoverCommand = $sqliteBinaryCommand . ' ' . escapeshellarg($databasePath) . ' ".recover" 2>/dev/null';
+    $recoverOutput = shell_exec($recoverCommand);
+
+    if (!is_string($recoverOutput) || trim($recoverOutput) === '') {
+        throw new RuntimeException('sqlite3 no pudo extraer datos de la copia dañada.');
+    }
+
+    return recover_state_from_sqlite_dump($recoverOutput);
+}
+
+function recover_state_from_quarantined_database(string $databasePath): array
+{
+    try {
+        return load_state_from_database_file($databasePath);
+    } catch (Throwable $exception) {
+        return recover_state_with_sqlite_cli($databasePath);
+    }
+}
+
 function open_database_with_state(): array
 {
     $pdo = open_database();
