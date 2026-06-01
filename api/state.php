@@ -93,7 +93,7 @@ try {
         $payload = read_json_input();
         $action = isset($payload['action']) ? (string) $payload['action'] : null;
 
-        if ($action === 'inspectQuarantined' || $action === 'restoreQuarantined') {
+        if ($action === 'inspectQuarantinedMeta' || $action === 'inspectQuarantined' || $action === 'restoreQuarantined') {
             if (($user['role'] ?? '') !== 'admin') {
                 json_response(['message' => 'Solo el administrador puede restaurar copias antiguas.'], 403);
             }
@@ -106,6 +106,18 @@ try {
 
             if (!$candidates) {
                 json_response(['message' => 'No se encontraron copias antiguas para restaurar.'], 404);
+            }
+
+            if ($action === 'inspectQuarantinedMeta') {
+                json_response([
+                    'candidates' => array_map(static function (string $candidatePath): array {
+                        return [
+                            'file' => basename($candidatePath),
+                            'size' => is_file($candidatePath) ? filesize($candidatePath) : null,
+                            'modifiedAt' => is_file($candidatePath) ? gmdate('c', (int) filemtime($candidatePath)) : null,
+                        ];
+                    }, $candidates),
+                ]);
             }
 
             if ($action === 'inspectQuarantined') {
