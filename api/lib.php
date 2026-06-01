@@ -280,12 +280,53 @@ function recover_state_with_sqlite_cli(string $databasePath): array
     return recover_state_from_sqlite_dump($recoverOutput);
 }
 
+function recover_state_from_raw_database_file(string $databasePath): array
+{
+    $rawContents = file_get_contents($databasePath);
+
+    if (!is_string($rawContents) || $rawContents === '') {
+        throw new RuntimeException('No se pudo leer la copia dañada para extraer el estado en bruto.');
+    }
+
+    $startNeedle = '{"users":';
+    $sessionsNeedle = ',"sessions":';
+    $searchOffset = 0;
+
+    while (($startPosition = strpos($rawContents, $startNeedle, $searchOffset)) !== false) {
+        $sessionsPosition = strpos($rawContents, $sessionsNeedle, $startPosition);
+
+        if ($sessionsPosition === false) {
+            break;
+        }
+
+        $endSearchOffset = $sessionsPosition;
+
+        while (($endPosition = strpos($rawContents, ']}' , $endSearchOffset)) !== false) {
+            $candidate = substr($rawContents, $startPosition, $endPosition + 2 - $startPosition);
+
+            try {
+                return decode_state_payload($candidate);
+            } catch (Throwable $exception) {
+                $endSearchOffset = $endPosition + 2;
+            }
+        }
+
+        $searchOffset = $startPosition + 1;
+    }
+
+    throw new RuntimeException('No se encontro un estado JSON valido dentro de la copia dañada.');
+}
+
 function recover_state_from_quarantined_database(string $databasePath): array
 {
     try {
         return load_state_from_database_file($databasePath);
     } catch (Throwable $exception) {
-        return recover_state_with_sqlite_cli($databasePath);
+        try {
+            return recover_state_with_sqlite_cli($databasePath);
+        } catch (Throwable $secondException) {
+            return recover_state_from_raw_database_file($databasePath);
+        }
     }
 }
 
