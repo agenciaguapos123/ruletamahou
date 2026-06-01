@@ -6,6 +6,31 @@ require __DIR__ . '/lib.php';
 @ini_set('memory_limit', '512M');
 @set_time_limit(120);
 
+register_shutdown_function(static function (): void {
+    $error = error_get_last();
+
+    if (!is_array($error)) {
+        return;
+    }
+
+    if (!in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR], true)) {
+        return;
+    }
+
+    if (headers_sent()) {
+        return;
+    }
+
+    http_response_code(500);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode([
+        'message' => 'Fallo fatal durante la recuperacion.',
+        'error' => $error['message'],
+        'file' => basename((string) ($error['file'] ?? '')),
+        'line' => (int) ($error['line'] ?? 0),
+    ]);
+});
+
 function list_quarantined_database_groups(string $databasePath): array
 {
     $directory = dirname($databasePath);
@@ -216,6 +241,58 @@ function summarize_state(array $state): array
     ];
 }
 
+function inspect_quarantined_group(array $group, string $databasePath): array
+{
+    $workingDirectory = dirname($databasePath) . DIRECTORY_SEPARATOR . 'recovery-' . uniqid('', true);
+    ensure_recovery_directory($workingDirectory);
+
+    try {
+        $workingDatabasePath = $workingDirectory . DIRECTORY_SEPARATOR . 'candidate.sqlite';
+        copy_recovery_artifact($group['base'], $workingDatabasePath);
+        copy_recovery_artifact($group['wal'], $workingDatabasePath . '-wal');
+        copy_recovery_artifact($group['shm'], $workingDatabasePath . '-shm');
+        copy_recovery_artifact($group['journal'], $workingDatabasePath . '-journal');
+
+        $inspectMethod = static function (callable $resolver): array {
+            try {
+                $state = $resolver();
+
+                if (!is_array($state)) {
+                    return ['ok' => false, 'error' => 'No devolvio un estado valido.'];
+                }
+
+                return ['ok' => true, 'summary' => summarize_state($state)];
+            } catch (Throwable $exception) {
+                return ['ok' => false, 'error' => $exception->getMessage()];
+            }
+        };
+
+        return [
+            'groupId' => $group['id'],
+            'sizes' => [
+                'base' => is_file($group['base']) ? filesize($group['base']) : null,
+                'wal' => is_string($group['wal']) && is_file($group['wal']) ? filesize($group['wal']) : null,
+                'shm' => is_string($group['shm']) && is_file($group['shm']) ? filesize($group['shm']) : null,
+                'journal' => is_string($group['journal']) && is_file($group['journal']) ? filesize($group['journal']) : null,
+            ],
+            'direct' => $inspectMethod(static function () use ($workingDatabasePath): ?array {
+                return extract_state_from_database_file($workingDatabasePath);
+            }),
+            'sqliteBinary' => [
+                'available' => get_sqlite_binary_path() !== null,
+                'result' => $inspectMethod(static function () use ($workingDatabasePath, $workingDirectory): ?array {
+                    return recover_state_with_sqlite_binary($workingDatabasePath, $workingDirectory);
+                }),
+            ],
+            'raw' => $inspectMethod(static function () use ($workingDatabasePath): array {
+                return recover_state_from_raw_database_file($workingDatabasePath);
+            }),
+        ];
+    } finally {
+        cleanup_recovery_directory($workingDirectory);
+    }
+}
+
 function restore_quarantined_group(array $group, string $databasePath): array
 {
     $workingDirectory = dirname($databasePath) . DIRECTORY_SEPARATOR . 'recovery-' . uniqid('', true);
@@ -317,6 +394,12 @@ try {
         }
     } else {
         $selectedGroup = $groups[0];
+    }
+
+    if ($action === 'inspect') {
+        json_response([
+            'inspection' => inspect_quarantined_group($selectedGroup, $databasePath),
+        ]);
     }
 
     $restoredState = restore_quarantined_group($selectedGroup, $databasePath);
