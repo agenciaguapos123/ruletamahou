@@ -4,6 +4,7 @@ param(
   [int]$Port = 65002,
   [string]$RemotePath = '/home/u641777215/public_html/ruleta',
   [string]$KeyPath,
+  [switch]$DeployRoot,
   [switch]$SkipBuild,
   [switch]$DryRun
 )
@@ -27,8 +28,10 @@ function Invoke-CheckedCommand {
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $appDir = (Resolve-Path (Join-Path $scriptDir '..')).Path
+$repoRoot = (Resolve-Path (Join-Path $appDir '..')).Path
 $distDir = Join-Path $appDir 'dist'
 $zipPath = Join-Path $appDir 'dist-hostinger.zip'
+$stagingDir = Join-Path $appDir 'deploy-root-staging'
 $remotePathNormalized = ($RemotePath -replace '\\', '/').TrimEnd('/')
 $remoteDirName = ($remotePathNormalized -split '/')[(-1)]
 $remoteHome = "/home/$RemoteUser"
@@ -70,7 +73,39 @@ try {
     Remove-Item $zipPath -Force
   }
 
-  Compress-Archive -Path (Join-Path $distDir '*') -DestinationPath $zipPath -Force
+  if ($DeployRoot) {
+    $deployItems = @(
+      '.htaccess',
+      'api',
+      'assets',
+      'brands',
+      'fonts',
+      'icons',
+      'index.html',
+      'vite.svg'
+    )
+
+    if (Test-Path $stagingDir) {
+      Remove-Item -LiteralPath $stagingDir -Recurse -Force
+    }
+
+    New-Item -ItemType Directory -Path $stagingDir | Out-Null
+
+    foreach ($item in $deployItems) {
+      $sourcePath = Join-Path $repoRoot $item
+
+      if (-not (Test-Path $sourcePath)) {
+        throw "Missing deploy artifact in repo root: $item"
+      }
+
+      Copy-Item -LiteralPath $sourcePath -Destination (Join-Path $stagingDir $item) -Recurse -Force
+    }
+
+    Compress-Archive -Path (Join-Path $stagingDir '*') -DestinationPath $zipPath -Force
+  }
+  else {
+    Compress-Archive -Path (Join-Path $distDir '*') -DestinationPath $zipPath -Force
+  }
 
   if ($DryRun) {
     Write-Host "Dry run enabled. Commands were not executed."
@@ -86,5 +121,9 @@ try {
   Write-Host "Backup created at $backupPath"
 }
 finally {
+  if (Test-Path $stagingDir) {
+    Remove-Item -LiteralPath $stagingDir -Recurse -Force
+  }
+
   Pop-Location
 }
