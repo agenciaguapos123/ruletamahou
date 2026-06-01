@@ -22,8 +22,8 @@ try {
 
     $username = isset($payload['username']) ? (string)$payload['username'] : '';
     $password = isset($payload['password']) ? (string)$payload['password'] : '';
-    $pdo = open_database();
-    $state = load_state($pdo);
+    $database = open_database_with_state();
+    $state = $database['state'];
     $user = find_user_by_credentials($state, $username, $password);
 
     if ($user === null) {

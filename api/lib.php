@@ -71,6 +71,70 @@ function open_database(): PDO
     return $pdo;
 }
 
+function is_malformed_database_exception(Throwable $exception): bool
+{
+    return $exception instanceof PDOException
+        && stripos($exception->getMessage(), 'database disk image is malformed') !== false;
+}
+
+function quarantine_database_artifact(string $artifactPath, string $timestamp): void
+{
+    if (!file_exists($artifactPath)) {
+        return;
+    }
+
+    $backupPath = $artifactPath . '.corrupt-' . $timestamp;
+    $attempt = 1;
+
+    while (file_exists($backupPath)) {
+        $backupPath = $artifactPath . '.corrupt-' . $timestamp . '-' . $attempt;
+        $attempt += 1;
+    }
+
+    if (!rename($artifactPath, $backupPath)) {
+        throw new RuntimeException('No se pudo aislar la base de datos dañada.');
+    }
+}
+
+function quarantine_malformed_database(string $databasePath): void
+{
+    $timestamp = gmdate('Ymd-His');
+
+    foreach ([$databasePath, $databasePath . '-wal', $databasePath . '-shm', $databasePath . '-journal'] as $artifactPath) {
+        quarantine_database_artifact($artifactPath, $timestamp);
+    }
+}
+
+function open_database_with_state(): array
+{
+    $pdo = open_database();
+
+    try {
+        return [
+            'pdo' => $pdo,
+            'state' => load_state($pdo),
+        ];
+    } catch (Throwable $exception) {
+        if (!is_malformed_database_exception($exception)) {
+            throw $exception;
+        }
+
+        $databasePath = get_database_path();
+        $pdo = null;
+
+        quarantine_malformed_database($databasePath);
+
+        $recoveredPdo = open_database();
+        $defaultState = build_default_state();
+        save_state($recoveredPdo, $defaultState);
+
+        return [
+            'pdo' => $recoveredPdo,
+            'state' => $defaultState,
+        ];
+    }
+}
+
 function ensure_schema(PDO $pdo): void
 {
     $pdo->exec(

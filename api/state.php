@@ -4,8 +4,9 @@ declare(strict_types=1);
 require __DIR__ . '/lib.php';
 
 try {
-    $pdo = open_database();
-    $state = load_state($pdo);
+    $database = open_database_with_state();
+    $pdo = $database['pdo'];
+    $state = $database['state'];
     $user = require_authenticated_user($state);
 
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
