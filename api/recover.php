@@ -363,9 +363,12 @@ try {
 
     if ($action === 'list') {
         json_response([
+            'version' => 'recover-diagnostics-v2',
             'groups' => array_map(static function (array $group): array {
                 return [
                     'id' => $group['id'],
+                    'baseSize' => is_string($group['base']) && is_file($group['base']) ? filesize($group['base']) : null,
+                    'baseModifiedAt' => is_string($group['base']) && is_file($group['base']) ? gmdate('c', (int) filemtime($group['base'])) : null,
                     'hasWal' => is_string($group['wal']) && $group['wal'] !== '',
                     'hasShm' => is_string($group['shm']) && $group['shm'] !== '',
                     'hasJournal' => is_string($group['journal']) && $group['journal'] !== '',
