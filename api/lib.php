@@ -53,6 +53,213 @@ function get_database_path(): string
     return dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . 'ruleta-data' . DIRECTORY_SEPARATOR . 'app-state.sqlite';
 }
 
+function build_state_artifact_path(string $databasePath, string $suffix): string
+{
+    if (substr($databasePath, -7) === '.sqlite') {
+        return substr($databasePath, 0, -7) . $suffix;
+    }
+
+    return $databasePath . $suffix;
+}
+
+function get_state_snapshot_path(?string $databasePath = null): string
+{
+    return build_state_artifact_path($databasePath ?? get_database_path(), '.snapshot.json');
+}
+
+function get_previous_state_snapshot_path(?string $databasePath = null): string
+{
+    return build_state_artifact_path($databasePath ?? get_database_path(), '.snapshot.previous.json');
+}
+
+function get_state_corruption_report_path(?string $databasePath = null, ?string $timestamp = null): string
+{
+    $suffix = $timestamp === null
+        ? '.corruption-report.json'
+        : '.corruption-report-' . $timestamp . '.json';
+
+    return build_state_artifact_path($databasePath ?? get_database_path(), $suffix);
+}
+
+function ensure_directory_exists(string $directoryPath): void
+{
+    if (is_dir($directoryPath)) {
+        return;
+    }
+
+    if (!mkdir($directoryPath, 0775, true) && !is_dir($directoryPath)) {
+        throw new RuntimeException('No se pudo crear el directorio de datos de la ruleta.');
+    }
+}
+
+function write_file_atomically(string $path, string $contents): void
+{
+    ensure_directory_exists(dirname($path));
+
+    $tempPath = $path . '.tmp-' . uniqid('', true);
+
+    if (file_put_contents($tempPath, $contents, LOCK_EX) === false) {
+        throw new RuntimeException('No se pudo escribir un artefacto temporal de la ruleta.');
+    }
+
+    @chmod($tempPath, 0664);
+
+    if (@rename($tempPath, $path)) {
+        return;
+    }
+
+    if (file_exists($path) && !@unlink($path)) {
+        @unlink($tempPath);
+        throw new RuntimeException('No se pudo reemplazar el artefacto anterior de la ruleta.');
+    }
+
+    if (!@rename($tempPath, $path)) {
+        @unlink($tempPath);
+        throw new RuntimeException('No se pudo publicar el artefacto de la ruleta.');
+    }
+}
+
+function is_state_like_payload(array $payload): bool
+{
+    foreach (['users', 'adminAccessCode', 'locations', 'islands', 'prizeCategories', 'campaigns', 'sessions'] as $key) {
+        if (array_key_exists($key, $payload)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function decode_state_snapshot_payload(string $snapshotPayload): array
+{
+    $decoded = json_decode($snapshotPayload, true);
+
+    if (!is_array($decoded)) {
+        throw new RuntimeException('La instantanea no contiene un JSON valido.');
+    }
+
+    if (isset($decoded['state']) && is_array($decoded['state'])) {
+        return normalize_state($decoded['state']);
+    }
+
+    if (!is_state_like_payload($decoded)) {
+        throw new RuntimeException('La instantanea no contiene un estado reconocible.');
+    }
+
+    return normalize_state($decoded);
+}
+
+function load_state_from_snapshot_file(string $snapshotPath): array
+{
+    $rawSnapshot = file_get_contents($snapshotPath);
+
+    if (!is_string($rawSnapshot) || trim($rawSnapshot) === '') {
+        throw new RuntimeException('La instantanea de estado esta vacia.');
+    }
+
+    return decode_state_snapshot_payload($rawSnapshot);
+}
+
+function recover_state_from_snapshots(?string $databasePath = null): ?array
+{
+    $resolvedDatabasePath = $databasePath ?? get_database_path();
+
+    foreach ([get_state_snapshot_path($resolvedDatabasePath), get_previous_state_snapshot_path($resolvedDatabasePath)] as $snapshotPath) {
+        if (!is_file($snapshotPath)) {
+            continue;
+        }
+
+        try {
+            return load_state_from_snapshot_file($snapshotPath);
+        } catch (Throwable $exception) {
+        }
+    }
+
+    return null;
+}
+
+function persist_state_snapshot(array $state, ?string $savedAt = null, ?string $databasePath = null): void
+{
+    $resolvedDatabasePath = $databasePath ?? get_database_path();
+    $currentSnapshotPath = get_state_snapshot_path($resolvedDatabasePath);
+    $previousSnapshotPath = get_previous_state_snapshot_path($resolvedDatabasePath);
+    $normalizedState = normalize_state($state);
+
+    if (is_file($currentSnapshotPath)) {
+        $currentSnapshot = file_get_contents($currentSnapshotPath);
+
+        if (is_string($currentSnapshot) && trim($currentSnapshot) !== '') {
+            try {
+                decode_state_snapshot_payload($currentSnapshot);
+                write_file_atomically($previousSnapshotPath, $currentSnapshot);
+            } catch (Throwable $exception) {
+            }
+        }
+    }
+
+    $snapshotPayload = json_encode([
+        'version' => 1,
+        'savedAt' => $savedAt ?? gmdate('c'),
+        'state' => $normalizedState,
+    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+    if ($snapshotPayload === false) {
+        throw new RuntimeException('No se pudo serializar la instantanea del estado.');
+    }
+
+    write_file_atomically($currentSnapshotPath, $snapshotPayload);
+}
+
+function ensure_state_snapshot_exists(array $state, ?string $databasePath = null): void
+{
+    $resolvedDatabasePath = $databasePath ?? get_database_path();
+
+    if (is_file(get_state_snapshot_path($resolvedDatabasePath))) {
+        return;
+    }
+
+    persist_state_snapshot($state, null, $resolvedDatabasePath);
+}
+
+function describe_file_artifact(string $path): array
+{
+    return [
+        'path' => $path,
+        'exists' => is_file($path),
+        'size' => is_file($path) ? filesize($path) : null,
+        'modifiedAt' => is_file($path) ? gmdate('c', (int) filemtime($path)) : null,
+    ];
+}
+
+function write_corruption_report(
+    string $databasePath,
+    Throwable $exception,
+    array $quarantinedArtifacts,
+    ?string $recoverySource
+): void {
+    $reportPayload = json_encode([
+        'detectedAt' => gmdate('c'),
+        'databasePath' => $databasePath,
+        'error' => [
+            'type' => get_class($exception),
+            'message' => $exception->getMessage(),
+        ],
+        'quarantinedArtifacts' => array_map('describe_file_artifact', $quarantinedArtifacts),
+        'snapshotArtifacts' => [
+            describe_file_artifact(get_state_snapshot_path($databasePath)),
+            describe_file_artifact(get_previous_state_snapshot_path($databasePath)),
+        ],
+        'recoverySource' => $recoverySource,
+    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+
+    if ($reportPayload === false) {
+        return;
+    }
+
+    write_file_atomically(get_state_corruption_report_path($databasePath), $reportPayload);
+    write_file_atomically(get_state_corruption_report_path($databasePath, gmdate('Ymd-His')), $reportPayload);
+}
+
 function open_database(): PDO
 {
     $databasePath = get_database_path();
@@ -77,10 +284,10 @@ function is_malformed_database_exception(Throwable $exception): bool
         && stripos($exception->getMessage(), 'database disk image is malformed') !== false;
 }
 
-function quarantine_database_artifact(string $artifactPath, string $timestamp): void
+function quarantine_database_artifact(string $artifactPath, string $timestamp): ?string
 {
     if (!file_exists($artifactPath)) {
-        return;
+        return null;
     }
 
     $backupPath = $artifactPath . '.corrupt-' . $timestamp;
@@ -94,15 +301,24 @@ function quarantine_database_artifact(string $artifactPath, string $timestamp): 
     if (!rename($artifactPath, $backupPath)) {
         throw new RuntimeException('No se pudo aislar la base de datos dañada.');
     }
+
+    return $backupPath;
 }
 
-function quarantine_malformed_database(string $databasePath): void
+function quarantine_malformed_database(string $databasePath): array
 {
     $timestamp = gmdate('Ymd-His');
+    $quarantinedArtifacts = [];
 
     foreach ([$databasePath, $databasePath . '-wal', $databasePath . '-shm', $databasePath . '-journal'] as $artifactPath) {
-        quarantine_database_artifact($artifactPath, $timestamp);
+        $backupPath = quarantine_database_artifact($artifactPath, $timestamp);
+
+        if ($backupPath !== null) {
+            $quarantinedArtifacts[] = $backupPath;
+        }
     }
+
+    return $quarantinedArtifacts;
 }
 
 function archive_database_artifact(string $artifactPath, string $label, string $timestamp): void
@@ -169,6 +385,144 @@ function decode_state_payload(string $encodedState): array
     }
 
     return normalize_state($decoded);
+}
+
+function merge_state_collection(array $preferredItems, array $fallbackItems, callable $identityResolver): array
+{
+    $fallbackByIdentity = [];
+    $usedIdentities = [];
+    $mergedItems = [];
+
+    foreach ($fallbackItems as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+
+        $identity = $identityResolver($item);
+
+        if ($identity !== null && !isset($fallbackByIdentity[$identity])) {
+            $fallbackByIdentity[$identity] = $item;
+        }
+    }
+
+    foreach ($preferredItems as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+
+        $identity = $identityResolver($item);
+
+        if ($identity !== null && isset($fallbackByIdentity[$identity])) {
+            $mergedItems[] = array_replace($fallbackByIdentity[$identity], $item);
+            $usedIdentities[$identity] = true;
+            continue;
+        }
+
+        if ($identity !== null) {
+            $usedIdentities[$identity] = true;
+        }
+
+        $mergedItems[] = $item;
+    }
+
+    foreach ($fallbackItems as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+
+        $identity = $identityResolver($item);
+
+        if ($identity !== null && isset($usedIdentities[$identity])) {
+            continue;
+        }
+
+        if ($identity !== null) {
+            $usedIdentities[$identity] = true;
+        }
+
+        $mergedItems[] = $item;
+    }
+
+    return $mergedItems;
+}
+
+function merge_state_payloads(array $preferredState, array $fallbackState): array
+{
+    $resolveEntityIdentity = static function (array $item, array $candidateKeys): ?string {
+        foreach ($candidateKeys as $candidateKey) {
+            if (!isset($item[$candidateKey]) || !is_string($item[$candidateKey])) {
+                continue;
+            }
+
+            $value = trim($item[$candidateKey]);
+
+            if ($value !== '') {
+                return $candidateKey . ':' . $value;
+            }
+        }
+
+        return null;
+    };
+
+    return normalize_state([
+        'users' => merge_state_collection(
+            $preferredState['users'] ?? [],
+            $fallbackState['users'] ?? [],
+            static function (array $item) use ($resolveEntityIdentity): ?string {
+                return $resolveEntityIdentity($item, ['id', 'username']);
+            }
+        ),
+        'adminAccessCode' => isset($preferredState['adminAccessCode'])
+            && is_string($preferredState['adminAccessCode'])
+            && trim($preferredState['adminAccessCode']) !== ''
+                ? $preferredState['adminAccessCode']
+                : (($fallbackState['adminAccessCode'] ?? null) ?: 'mahou-admin'),
+        'locations' => merge_state_collection(
+            $preferredState['locations'] ?? [],
+            $fallbackState['locations'] ?? [],
+            static function (array $item) use ($resolveEntityIdentity): ?string {
+                return $resolveEntityIdentity($item, ['id', 'name']);
+            }
+        ),
+        'islands' => merge_state_collection(
+            $preferredState['islands'] ?? [],
+            $fallbackState['islands'] ?? [],
+            static function (array $item) use ($resolveEntityIdentity): ?string {
+                return $resolveEntityIdentity($item, ['id', 'name']);
+            }
+        ),
+        'prizeCategories' => merge_state_collection(
+            $preferredState['prizeCategories'] ?? [],
+            $fallbackState['prizeCategories'] ?? [],
+            static function (array $item) use ($resolveEntityIdentity): ?string {
+                return $resolveEntityIdentity($item, ['id', 'name']);
+            }
+        ),
+        'campaigns' => merge_state_collection(
+            $preferredState['campaigns'] ?? [],
+            $fallbackState['campaigns'] ?? [],
+            static function (array $item) use ($resolveEntityIdentity): ?string {
+                return $resolveEntityIdentity($item, ['id', 'name']);
+            }
+        ),
+        'sessions' => merge_state_collection(
+            $preferredState['sessions'] ?? [],
+            $fallbackState['sessions'] ?? [],
+            static function (array $item) use ($resolveEntityIdentity): ?string {
+                return $resolveEntityIdentity($item, ['id', 'campaignId', 'campaignName']);
+            }
+        ),
+    ]);
+}
+
+function recover_state_from_database_fallbacks(string $databasePath): ?array
+{
+    try {
+        return recover_state_from_raw_database_file($databasePath);
+    } catch (Throwable $exception) {
+    }
+
+    return recover_state_from_snapshots($databasePath);
 }
 
 function load_state_from_database_file(string $databasePath): array
@@ -282,36 +636,83 @@ function recover_state_with_sqlite_cli(string $databasePath): array
 
 function recover_state_from_raw_database_file(string $databasePath): array
 {
-    $rawContents = file_get_contents($databasePath);
+    $handle = @fopen($databasePath, 'rb');
 
-    if (!is_string($rawContents) || $rawContents === '') {
+    if (!is_resource($handle)) {
         throw new RuntimeException('No se pudo leer la copia dañada para extraer el estado en bruto.');
     }
 
     $startNeedle = '{"users":';
     $sessionsNeedle = ',"sessions":';
-    $searchOffset = 0;
+    $endNeedle = ']}';
+    $chunkSize = 1024 * 1024;
+    $carryLimit = 16 * 1024 * 1024;
+    $buffer = '';
+    $recoveredState = null;
 
-    while (($startPosition = strpos($rawContents, $startNeedle, $searchOffset)) !== false) {
-        $sessionsPosition = strpos($rawContents, $sessionsNeedle, $startPosition);
+    try {
+        while (!feof($handle)) {
+            $chunk = fread($handle, $chunkSize);
 
-        if ($sessionsPosition === false) {
-            break;
-        }
+            if ($chunk === false) {
+                break;
+            }
 
-        $endSearchOffset = $sessionsPosition;
+            $buffer .= $chunk;
+            $searchOffset = 0;
+            $consumedOffset = 0;
+            $pendingStartPosition = null;
 
-        while (($endPosition = strpos($rawContents, ']}' , $endSearchOffset)) !== false) {
-            $candidate = substr($rawContents, $startPosition, $endPosition + 2 - $startPosition);
+            while (($startPosition = strpos($buffer, $startNeedle, $searchOffset)) !== false) {
+                $sessionsPosition = strpos($buffer, $sessionsNeedle, $startPosition);
 
-            try {
-                return decode_state_payload($candidate);
-            } catch (Throwable $exception) {
-                $endSearchOffset = $endPosition + 2;
+                if ($sessionsPosition === false) {
+                    $pendingStartPosition = $startPosition;
+                    $searchOffset = $startPosition + 1;
+                    continue;
+                }
+
+                $endPosition = strpos($buffer, $endNeedle, $sessionsPosition);
+
+                if ($endPosition === false) {
+                    $pendingStartPosition = $startPosition;
+                    $searchOffset = $startPosition + 1;
+                    continue;
+                }
+
+                $candidate = substr($buffer, $startPosition, $endPosition + strlen($endNeedle) - $startPosition);
+
+                try {
+                    $candidateState = decode_state_payload($candidate);
+                    $recoveredState = $recoveredState === null
+                        ? $candidateState
+                        : merge_state_payloads($candidateState, $recoveredState);
+                } catch (Throwable $exception) {
+                }
+
+                $pendingStartPosition = null;
+                $searchOffset = $startPosition + 1;
+                $consumedOffset = $searchOffset;
+            }
+
+            if ($pendingStartPosition !== null) {
+                $buffer = substr($buffer, $pendingStartPosition);
+            } elseif ($consumedOffset > 0) {
+                $buffer = substr($buffer, $consumedOffset);
+            } elseif (strlen($buffer) > strlen($startNeedle)) {
+                $buffer = substr($buffer, -strlen($startNeedle));
+            }
+
+            if (strlen($buffer) > $carryLimit) {
+                $buffer = substr($buffer, -$carryLimit);
             }
         }
+    } finally {
+        fclose($handle);
+    }
 
-        $searchOffset = $startPosition + 1;
+    if ($recoveredState !== null) {
+        return $recoveredState;
     }
 
     throw new RuntimeException('No se encontro un estado JSON valido dentro de la copia dañada.');
@@ -347,15 +748,45 @@ function open_database_with_state(): array
         $databasePath = get_database_path();
         $pdo = null;
 
-        quarantine_malformed_database($databasePath);
+        $quarantinedArtifacts = quarantine_malformed_database($databasePath);
 
         $recoveredPdo = open_database();
-        $defaultState = build_default_state();
-        save_state($recoveredPdo, $defaultState);
+        $snapshotState = recover_state_from_snapshots($databasePath);
+        $recoveredState = null;
+        $recoverySource = 'default';
+
+        foreach (list_quarantined_database_paths($databasePath) as $quarantinedPath) {
+            try {
+                $recoveredState = recover_state_from_quarantined_database($quarantinedPath);
+                $recoverySource = 'quarantined';
+                break;
+            } catch (Throwable $recoveryException) {
+            }
+        }
+
+        if ($recoveredState !== null && $snapshotState !== null) {
+            $recoveredState = merge_state_payloads($recoveredState, $snapshotState);
+            $recoverySource = 'quarantined+snapshot';
+        } elseif ($recoveredState === null && $snapshotState !== null) {
+            $recoveredState = $snapshotState;
+            $recoverySource = 'snapshot';
+        }
+
+        if ($recoveredState === null) {
+            $recoveredState = build_default_state();
+        }
+
+        save_state($recoveredPdo, $recoveredState);
+
+        try {
+            write_corruption_report($databasePath, $exception, $quarantinedArtifacts, $recoverySource);
+        } catch (Throwable $reportException) {
+            error_log('Ruleta corruption report failed: ' . $reportException->getMessage());
+        }
 
         return [
             'pdo' => $recoveredPdo,
-            'state' => $defaultState,
+            'state' => $recoveredState,
         ];
     }
 }
@@ -629,6 +1060,13 @@ function load_state(PDO $pdo): array
     $row = $statement !== false ? $statement->fetch() : false;
 
     if (!is_array($row) || !isset($row['state_json'])) {
+        $fallbackState = recover_state_from_database_fallbacks(get_database_path());
+
+        if ($fallbackState !== null) {
+            save_state($pdo, $fallbackState);
+            return $fallbackState;
+        }
+
         $defaultState = build_default_state();
         save_state($pdo, $defaultState);
         return $defaultState;
@@ -637,12 +1075,27 @@ function load_state(PDO $pdo): array
     $decoded = json_decode((string)$row['state_json'], true);
 
     if (!is_array($decoded)) {
+        $fallbackState = recover_state_from_database_fallbacks(get_database_path());
+
+        if ($fallbackState !== null) {
+            save_state($pdo, $fallbackState);
+            return $fallbackState;
+        }
+
         $defaultState = build_default_state();
         save_state($pdo, $defaultState);
         return $defaultState;
     }
 
-    return normalize_state($decoded);
+    $normalizedState = normalize_state($decoded);
+
+    try {
+        ensure_state_snapshot_exists($normalizedState);
+    } catch (Throwable $exception) {
+        error_log('Ruleta snapshot init failed: ' . $exception->getMessage());
+    }
+
+    return $normalizedState;
 }
 
 function save_state(PDO $pdo, array $state): void
@@ -668,6 +1121,12 @@ function save_state(PDO $pdo, array $state): void
         ':created_at' => $timestamp,
         ':updated_at' => $timestamp,
     ]);
+
+    try {
+        persist_state_snapshot($normalizedState, $timestamp);
+    } catch (Throwable $exception) {
+        error_log('Ruleta snapshot save failed: ' . $exception->getMessage());
+    }
 }
 
 function find_user_by_credentials(array $state, string $username, string $password): ?array
